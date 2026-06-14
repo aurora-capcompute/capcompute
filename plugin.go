@@ -10,11 +10,10 @@ import (
 )
 
 var (
-	ErrCompiledPluginRequired = errors.New("compiled plugin is required")
-	ErrDispatcherRequired     = errors.New("dispatcher is required")
-	ErrSessionRequired        = errors.New("session is required")
-	ErrSessionActive          = errors.New("session is already playing")
-	ErrSessionStoreRequired   = errors.New("session store is required")
+	ErrDispatcherRequired   = errors.New("dispatcher is required")
+	ErrSessionRequired      = errors.New("session is required")
+	ErrSessionActive        = errors.New("session is already playing")
+	ErrSessionStoreRequired = errors.New("session store is required")
 )
 
 // SessionKey lets user-owned run data expose the stable identity used for session maps.

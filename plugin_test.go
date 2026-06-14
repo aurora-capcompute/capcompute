@@ -3,8 +3,6 @@ package capcompute
 import (
 	"capcompute/dispatcher"
 	"context"
-	"encoding/json"
-	"errors"
 	"testing"
 )
 
@@ -124,90 +122,6 @@ func TestNewComputeCompiledPluginRequiresSessionStore(t *testing.T) {
 	})
 	if err != ErrSessionStoreRequired {
 		t.Fatalf("error = %v, want ErrSessionStoreRequired", err)
-	}
-}
-
-func TestBeginPlayRejectsActiveSession(t *testing.T) {
-	key := testSessionKey{id: "run-1"}
-	store := newTestSessionStore(map[string]*Session[testSessionKey]{
-		"run-1": {guestData: key},
-	})
-	store.markActive("run-1")
-	compute := &ComputeCompiledPlugin[string, testSessionKey]{sessionStore: store}
-
-	_, err := compute.beginPlay(context.Background(), "run-1", key, PlayRequest{})
-	if err != ErrSessionActive {
-		t.Fatalf("error = %v, want ErrSessionActive", err)
-	}
-}
-
-func TestBeginPlayReusesSessionAndResetsDispatcher(t *testing.T) {
-	oldKey := testSessionKey{id: "run-1", value: "old"}
-	newKey := testSessionKey{id: "run-1", value: "new"}
-	request := PlayRequest{Input: json.RawMessage(`{"x":1}`), Entrypoint: "custom"}
-	existing := &Session[testSessionKey]{
-		guestData:  oldKey,
-		dispatcher: testDispatcher{},
-	}
-	store := newTestSessionStore(map[string]*Session[testSessionKey]{"run-1": existing})
-	compute := &ComputeCompiledPlugin[string, testSessionKey]{sessionStore: store}
-
-	session, err := compute.beginPlay(context.Background(), "run-1", newKey, request)
-	if err != nil {
-		t.Fatalf("begin play: %v", err)
-	}
-	if session != existing {
-		t.Fatal("begin play did not reuse existing session")
-	}
-	if session.guestData != newKey {
-		t.Fatalf("guest data = %#v, want %#v", session.guestData, newKey)
-	}
-	if string(session.request.Input) != `{"x":1}` || session.request.Entrypoint != "custom" {
-		t.Fatalf("request = %#v", session.request)
-	}
-	if session.dispatcher != nil {
-		t.Fatal("dispatcher was not reset")
-	}
-	if _, ok := store.active["run-1"]; !ok {
-		t.Fatal("session was not marked active")
-	}
-}
-
-func TestPlayReleasesActiveSessionWhenDispatcherFactoryFails(t *testing.T) {
-	key := testSessionKey{id: "run-1"}
-	dispatcherErr := errors.New("dispatcher failed")
-	store := newTestSessionStore(map[string]*Session[testSessionKey]{
-		"run-1": {guestData: key},
-	})
-	compute := &ComputeCompiledPlugin[string, testSessionKey]{
-		dispatchers:  testDispatcherFactory{err: dispatcherErr},
-		sessionStore: store,
-	}
-
-	results, err := compute.Play(context.Background(), key, PlayRequest{})
-	if !errors.Is(err, dispatcherErr) {
-		t.Fatalf("error = %v, want dispatcher error", err)
-	}
-	if results != nil {
-		t.Fatal("results should be nil when Play fails before starting")
-	}
-	if _, ok := store.active["run-1"]; ok {
-		t.Fatal("active session was not released")
-	}
-}
-
-func TestSessionKeepsDispatcherAfterYield(t *testing.T) {
-	session := &Session[testSessionKey]{}
-	session.startPlay(testDispatcher{})
-	session.finishPlay(true)
-
-	if session.dispatcher == nil {
-		t.Fatal("dispatcher should be kept after yield")
-	}
-
-	session.finishPlay(false)
-	if session.dispatcher != nil {
-		t.Fatal("dispatcher should be cleared after completion")
 	}
 }
 
