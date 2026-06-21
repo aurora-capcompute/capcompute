@@ -74,6 +74,11 @@ previously committed outcomes from the same journal. The capability call that
 was active during cancellation may execute again because it had no committed
 outcome.
 
+Journal-backed replay records deterministic result and failed outcomes. Yield
+is never committed. Dispatchers should return a Go error for cancellation or
+other transient infrastructure failures that must be retried rather than
+returning a deterministic failed outcome.
+
 ## Session Model
 
 `Session` is the runtime object for one logical run. It contains:
@@ -176,7 +181,10 @@ from its exported function with the play-result convention described below.
   terminated;
 - `PlayYielded`: the guest succeeded and returned JSON with
   `{"status":"yielded"}`;
-- `PlayCompleted`: the guest succeeded and returned anything else.
+- `PlayCompleted`: the guest succeeded and returned JSON with
+  `{"status":"completed"}`;
+- `PlayFailed`: the guest output was not valid JSON or did not contain one of
+  those two explicit statuses.
 
 This convention keeps the library minimal. Yielding only means "this play
 attempt stopped at a point chosen by the guest." The wrapping system decides

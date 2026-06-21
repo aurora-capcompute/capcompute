@@ -84,3 +84,27 @@ func TestDispatcherRecordsResult(t *testing.T) {
 		t.Fatal("result should be recorded")
 	}
 }
+
+func TestDispatcherRecordsFailure(t *testing.T) {
+	tape := &tapeFunc{}
+	replay := &Dispatcher[string]{
+		tape: tape,
+		next: nextFunc[string](func(context.Context, string, dispatcher.Call) (dispatcher.Outcome, error) {
+			return dispatcher.Failed("denied"), nil
+		}),
+	}
+
+	outcome, err := replay.Dispatch(context.Background(), "run-1", dispatcher.Call{Name: "step.one"})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if outcome.Kind() != dispatcher.OutcomeFailed {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+	if tape.reset {
+		t.Fatal("failure should not reset tape")
+	}
+	if !tape.recorded {
+		t.Fatal("failure should be recorded")
+	}
+}

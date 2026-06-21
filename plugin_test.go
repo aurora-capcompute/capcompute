@@ -3,6 +3,7 @@ package capcompute
 import (
 	"capcompute/dispatcher"
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -83,19 +84,33 @@ func TestComputeCompiledPluginExposesCompiledCleanup(t *testing.T) {
 }
 
 func TestPlayStatusReadsYieldedOutput(t *testing.T) {
-	if got := playStatus([]byte(`{"status":"yielded"}`)); got != PlayYielded {
+	got, err := playStatus([]byte(`{"status":"yielded"}`))
+	if err != nil {
+		t.Fatalf("play status: %v", err)
+	}
+	if got != PlayYielded {
 		t.Fatalf("status = %s, want %s", got, PlayYielded)
 	}
 }
 
-func TestPlayStatusDefaultsToCompleted(t *testing.T) {
+func TestPlayStatusReadsCompletedOutput(t *testing.T) {
+	got, err := playStatus([]byte(`{"status":"completed"}`))
+	if err != nil {
+		t.Fatalf("play status: %v", err)
+	}
+	if got != PlayCompleted {
+		t.Fatalf("status = %s, want %s", got, PlayCompleted)
+	}
+}
+
+func TestPlayStatusRejectsInvalidOutput(t *testing.T) {
 	for _, output := range [][]byte{
-		[]byte(`{"status":"completed"}`),
 		[]byte(`{"answer":"done"}`),
+		[]byte(`{"status":"unknown"}`),
 		[]byte(`not json`),
 	} {
-		if got := playStatus(output); got != PlayCompleted {
-			t.Fatalf("status = %s for %s, want %s", got, output, PlayCompleted)
+		if _, err := playStatus(output); !errors.Is(err, ErrInvalidGuestOutput) {
+			t.Fatalf("error = %v for %s, want ErrInvalidGuestOutput", err, output)
 		}
 	}
 }

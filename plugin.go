@@ -13,6 +13,7 @@ import (
 
 var (
 	ErrDispatcherRequired   = errors.New("dispatcher is required")
+	ErrInvalidGuestOutput   = errors.New("invalid guest output")
 	ErrSessionActive        = errors.New("session is already active")
 	ErrSessionRequired      = errors.New("session is required")
 	ErrSessionStoreRequired = errors.New("session store is required")
@@ -294,7 +295,16 @@ func (c *ComputeCompiledPlugin[ID, K]) Play(ctx context.Context, session *Sessio
 			handle.results <- PlayResult[K]{Status: PlayFailed, Exit: exit, Err: err}
 			return
 		}
-		status := playStatus(output)
+		status, statusErr := playStatus(output)
+		if statusErr != nil {
+			handle.results <- PlayResult[K]{
+				Status: PlayFailed,
+				Output: append(json.RawMessage(nil), output...),
+				Exit:   exit,
+				Err:    statusErr,
+			}
+			return
+		}
 		if status == PlayYielded {
 			handle.results <- PlayResult[K]{
 				Status: PlayYielded,
@@ -312,15 +322,22 @@ func (c *ComputeCompiledPlugin[ID, K]) Play(ctx context.Context, session *Sessio
 	return handle, nil
 }
 
-func playStatus(output []byte) PlayStatus {
+func playStatus(output []byte) (PlayStatus, error) {
 	var envelope struct {
 		Status PlayStatus `json:"status"`
 	}
 	if err := json.Unmarshal(output, &envelope); err != nil {
-		return PlayCompleted
+		return PlayFailed, errors.Join(ErrInvalidGuestOutput, err)
 	}
-	if envelope.Status == PlayYielded {
-		return PlayYielded
+	switch envelope.Status {
+	case PlayCompleted:
+		return PlayCompleted, nil
+	case PlayYielded:
+		return PlayYielded, nil
+	default:
+		return PlayFailed, errors.Join(
+			ErrInvalidGuestOutput,
+			errors.New("status must be completed or yielded"),
+		)
 	}
-	return PlayCompleted
 }

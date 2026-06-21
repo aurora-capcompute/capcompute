@@ -20,10 +20,11 @@
 // state in context.
 //
 // Play has four observable outcomes. A successful guest call whose JSON output
-// contains {"status":"yielded"} returns PlayYielded. Any other successful guest
-// call returns PlayCompleted. A stopped invocation returns PlayStopped and
-// permanently terminates that physical session. A guest or runtime error returns
-// PlayFailed.
+// contains {"status":"yielded"} returns PlayYielded, while an explicit
+// {"status":"completed"} returns PlayCompleted. Missing or unsupported status
+// values return PlayFailed. A stopped invocation returns PlayStopped and
+// permanently terminates that physical session. Guest and runtime errors also
+// return PlayFailed.
 //
 // SessionStore is a runtime lookup boundary. Durable stores should persist the
 // data needed by their application to recreate sessions, then hydrate a fresh

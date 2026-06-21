@@ -127,7 +127,7 @@ Replay dispatcher behavior:
 
 - replay from tape when a record exists;
 - delegate upstream when no record exists;
-- record `OutcomeResult`;
+- record deterministic `OutcomeResult` and `OutcomeFailed`;
 - reset tape on `OutcomeYield`;
 - do not record `OutcomeYield`.
 

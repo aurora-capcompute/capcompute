@@ -70,8 +70,11 @@ func (t *Tape) Next(call dispatcher.Call) (dispatcher.Outcome, bool, error) {
 }
 
 func (t *Tape) Record(call dispatcher.Call, outcome dispatcher.Outcome) error {
-	if t == nil || outcome.Kind() != dispatcher.OutcomeResult {
+	if t == nil || outcome.Kind() == dispatcher.OutcomeYield {
 		return nil
+	}
+	if outcome.Kind() != dispatcher.OutcomeResult && outcome.Kind() != dispatcher.OutcomeFailed {
+		return fmt.Errorf("cannot record invalid outcome %q", outcome.Kind())
 	}
 	if err := t.records.Store(t.records.Length(), call, outcome); err != nil {
 		return err
