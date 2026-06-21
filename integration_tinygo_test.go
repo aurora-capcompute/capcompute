@@ -1,9 +1,9 @@
 package capcompute_test
 
 import (
+	"aurora-stores/memory"
 	"capcompute"
 	"capcompute/dispatcher"
-	"capcompute/session_store_memory"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,7 +54,7 @@ func TestTinyGoGuestPlayStates(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	store := session_store_memory.New[string, integrationSessionKey]()
+	store := memory.NewSessionStore[string, integrationSessionKey]()
 	compute, err := capcompute.NewComputeCompiledPlugin[string, integrationSessionKey](ctx, capcompute.Config[string, integrationSessionKey]{
 		Manifest: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
@@ -139,7 +139,7 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	store := session_store_memory.New[string, integrationSessionKey]()
+	store := memory.NewSessionStore[string, integrationSessionKey]()
 	compute, err := capcompute.NewComputeCompiledPlugin[string, integrationSessionKey](ctx, capcompute.Config[string, integrationSessionKey]{
 		Manifest: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},

@@ -1,9 +1,9 @@
 package journaled_test
 
 import (
+	"aurora-stores/memory"
 	"capcompute/dispatcher"
 	"capcompute/dispatcher/replay/tape/journaled"
-	"capcompute/dispatcher/replay/tape/journaled/journal/memory"
 	"testing"
 )
 

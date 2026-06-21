@@ -3,12 +3,21 @@ module capcompute
 go 1.26
 
 require (
+	aurora-stores v0.0.0
 	github.com/extism/go-pdk v1.1.3
 	github.com/extism/go-sdk v1.7.1
 	github.com/tetratelabs/wazero v1.9.0
 )
 
+replace aurora-stores => ../aurora-stores
+
+replace aurora-capcompute => ../aurora-capcompute
+
+replace aurora-dispatchers => ../aurora-dispatchers
+
 require (
+	aurora-capcompute v0.0.0 // indirect
+	aurora-dispatchers v0.0.0 // indirect
 	github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20240805132620-81f5be970eca // indirect
