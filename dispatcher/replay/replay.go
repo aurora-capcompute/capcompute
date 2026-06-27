@@ -66,7 +66,7 @@ func (d *Dispatcher[K]) CheckCompleted() error {
 }
 
 func (d *Dispatcher[K]) Capabilities() []dispatcher2.Capability {
-	return dispatcher2.Capabilities(d.next)
+	return d.next.Capabilities()
 }
 
 // IncompleteError means the guest completed before replaying all recorded calls.

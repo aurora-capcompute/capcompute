@@ -55,7 +55,7 @@ func (session *Session[K]) Capabilities() []dispatcher.Capability {
 	if session == nil {
 		return nil
 	}
-	return dispatcher.Capabilities(session.dispatcher)
+	return session.dispatcher.Capabilities()
 }
 
 type sessionStatus uint8
