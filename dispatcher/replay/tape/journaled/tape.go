@@ -1,3 +1,8 @@
+// Package journaled is a replay Tape backed by an append-only Journal: it serves
+// recorded call/outcome pairs in order and appends new ones, raising
+// ReplayDivergedError when a re-run guest issues a call that does not match the
+// recorded sequence. It owns the on-tape record format and the divergence check;
+// the Journal itself — where records durably live — is supplied by the caller.
 package journaled
 
 import (

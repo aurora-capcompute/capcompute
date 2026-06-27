@@ -1,3 +1,9 @@
+// Package dispatcher defines the vocabulary a guest host call speaks: a Call
+// from the guest, an Outcome (result, yield, or failure) back, and the
+// Dispatcher interface that turns one into the other. It owns those types and
+// the small WithCapabilities decorator that advertises a dispatcher's
+// operations; it owns no capability behavior, persistence, or replay policy —
+// those live in concrete dispatchers and the replay decorators above it.
 package dispatcher
 
 import (

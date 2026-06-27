@@ -1,27 +1,20 @@
-# TODO
+# Scope
 
-Minimum remaining work for the library:
+The session-reconstruction primitives the library set out to provide are in
+place: `SessionStore` is interface-only (`LoadSession` / `SaveSession`),
+`CreateSession` rebuilds a session and its dispatcher chain from a
+`PlayRequest`, and host callbacks reload the session from the store on each
+guest call (see `host.go` and the package doc in `doc.go`). Reconstructing a
+yielded session after a restart is therefore `CreateSession` + `SaveSession`
+under the application's control — the library deliberately exposes no
+`Replay(sessionID)` entry point, because *when* a session resumes and *what*
+is injected back are the wrapping system's decisions.
 
-1. Reconstruct yielded sessions from the session store.
-
-   `Replay(ctx, sessionID)` should load the session record when the session is
-   not already in memory, recreate the Extism plugin instance, rebuild the
-   dispatcher chain, and replay from the original request.
-
-2. Keep session persistence interface-only.
-
-   `SessionStore` is root-owned and stores only data needed to reconstruct a
-   yielded session:
-
-   - session key;
-   - guest data;
-   - original `PlayRequest`;
-   - yielded call.
-
-   Do not add concrete persistent store implementations to this library yet.
-
-Out of scope for this library:
+This library deliberately does not own, and will not grow:
 
 - concrete persistent store implementations;
+- replay scheduling, queues, or async completion;
 - dispatching calls to other guests;
-- schedulers, queues, engines, or product-specific workflow code.
+- schedulers, engines, or product-specific workflow code.
+
+Those belong to the systems built on top of `capcompute`.

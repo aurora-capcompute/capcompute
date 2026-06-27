@@ -1,14 +1,31 @@
 package journaled_test
 
 import (
-	"aurora-stores/memory"
 	"capcompute/dispatcher"
 	"capcompute/dispatcher/replay/tape/journaled"
 	"testing"
 )
 
+// fakeJournal is an in-memory journaled.Journal. The tape needs only the Journal
+// contract, so the package's own tests supply it directly rather than depending
+// on a concrete store from a consumer module.
+type fakeJournal struct {
+	records []journaled.Record
+}
+
+func (j *fakeJournal) Load(idx int) (journaled.Record, error) {
+	return j.records[idx], nil
+}
+
+func (j *fakeJournal) Store(_ int, call dispatcher.Call, outcome dispatcher.Outcome) error {
+	j.records = append(j.records, journaled.Record{Call: call, Outcome: outcome})
+	return nil
+}
+
+func (j *fakeJournal) Length() int { return len(j.records) }
+
 func TestRecordConsumesNewRecord(t *testing.T) {
-	tape := journaled.NewTape(memory.NewJournal())
+	tape := journaled.NewTape(&fakeJournal{})
 
 	if err := tape.Record(dispatcher.Call{Name: "step.one"}, dispatcher.Result(nil)); err != nil {
 		t.Fatalf("record: %v", err)
@@ -19,7 +36,7 @@ func TestRecordConsumesNewRecord(t *testing.T) {
 }
 
 func TestResetReplaysRecordedResults(t *testing.T) {
-	tape := journaled.NewTape(memory.NewJournal())
+	tape := journaled.NewTape(&fakeJournal{})
 	call := dispatcher.Call{Name: "step.one"}
 
 	if err := tape.Record(call, dispatcher.Result([]byte(`{"ok":true}`))); err != nil {
@@ -43,7 +60,7 @@ func TestResetReplaysRecordedResults(t *testing.T) {
 }
 
 func TestResetReplaysRecordedFailures(t *testing.T) {
-	tape := journaled.NewTape(memory.NewJournal())
+	tape := journaled.NewTape(&fakeJournal{})
 	call := dispatcher.Call{Name: "step.one"}
 
 	if err := tape.Record(call, dispatcher.Failed("permission denied")); err != nil {
@@ -64,7 +81,7 @@ func TestResetReplaysRecordedFailures(t *testing.T) {
 }
 
 func TestYieldIsNotRecorded(t *testing.T) {
-	journal := memory.NewJournal()
+	journal := &fakeJournal{}
 	tape := journaled.NewTape(journal)
 	if err := tape.Record(dispatcher.Call{Name: "step.one"}, dispatcher.Yield("waiting")); err != nil {
 		t.Fatalf("record yield: %v", err)

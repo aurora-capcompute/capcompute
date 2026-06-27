@@ -1,3 +1,9 @@
+// Package replay decorates a dispatcher so a re-run guest sees the same
+// outcomes it saw the first time: each call is served from a Tape if already
+// recorded, otherwise delegated to the underlying dispatcher and recorded. It
+// owns the replay-cursor protocol (the Tape interface) and the divergence
+// checks; it does not own where the tape is stored — a concrete Tape such as
+// the journaled package supplies that.
 package replay
 
 import (
