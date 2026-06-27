@@ -37,6 +37,8 @@ func (f nextFunc[K]) Dispatch(ctx context.Context, key K, call dispatcher.Call) 
 	return f(ctx, key, call)
 }
 
+func (nextFunc[K]) Capabilities() []dispatcher.Capability { return nil }
+
 func TestDispatcherResetsTapeOnYield(t *testing.T) {
 	tape := &tapeFunc{}
 	replay := &Dispatcher[string]{

@@ -38,6 +38,8 @@ func (integrationDispatcher) Dispatch(_ context.Context, _ integrationSessionKey
 	}
 }
 
+func (integrationDispatcher) Capabilities() []dispatcher.Capability { return nil }
+
 func TestTinyGoGuestPlayStates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping TinyGo integration test in short mode")
