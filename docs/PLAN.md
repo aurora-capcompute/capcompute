@@ -199,6 +199,26 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
 
 ---
 
+## ABI v3 — protobuf envelope  — `BLOCKED(M3.1, M4.1)`  (CHALLENGE E, decided)
+
+Decision recorded in CHALLENGE.md E: keep the uniform envelope (mediation
+uniformity — the seccomp/strace argument; wazero has no component model, so
+WIT would force a runtime switch), migrate the *encoding* to protobuf once the
+record shape settles.
+
+- Motivations in order: schema-evolution discipline for long-lived journals
+  (serves versioned replay); protovalidate/CEL as a stronger monitor policy
+  substrate; per-field sensitivity/provenance annotations via custom field
+  options (feeds M4); typed codegen. **Not** performance (in-process copy at
+  LLM-turn cadence).
+- Caveats: TinyGo needs codegen-only protobuf (vtprotobuf-style; `prost` for
+  Rust) — verify a TinyGo round-trip first; keep a `protojson` rendering path
+  so journals/audit stay human-readable.
+- Lands as a clean cut: `abi: 3` in the envelope; guests and host migrate
+  together (no backwards compatibility, per prototype policy).
+  DoD: proto envelope round-trips host↔both brains; journal records in proto
+  with protojson display; ABI v2 rejected with `bad_abi`.
+
 ## Cross-cutting (do alongside, not as a milestone)
 
 - **Journal lifecycle** — `BLOCKED(M3.1)` (CHALLENGE G, supersedes ROADMAP #7):

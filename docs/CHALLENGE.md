@@ -18,7 +18,7 @@ where the research exists only as papers. Each is labelled.
 | B | No resource management (CPU/memory/quota metering) — the missing OS half | gap | **high** | ★★ |
 | C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ |
 | D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ |
-| E | JSON-string syscall ABI vs typed/component-model interfaces | weak abstraction | medium | ★ |
+| E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope, protobuf as ABI v3 | ADR (decided) | — | ★ |
 | F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ |
 | G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ |
 | H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ |
@@ -169,27 +169,56 @@ assert the finding-8/9 invariants hold across the matrix. Few agent runtimes can
 DST because few are deterministic — this is both a robustness multiplier and a
 differentiator. New ROADMAP #14.
 
-## E. The JSON-string syscall ABI is a weak abstraction — but the fix is a real tradeoff
+## E. The JSON envelope ABI — DECIDED: deliberate trade, validated (ADR)
 
-**What it is.** Syscalls are JSON blobs over a linear-memory pointer: untyped,
-serialized every call, no compiler-checked guest/host contract, per-call schema
-evolution ad hoc.
+**Decision (recorded 2026-07).** The uniform JSON envelope is kept **by
+design**; WIT/component-model is rejected for this kernel; **protobuf is the
+designated successor encoding as ABI v3**, after M3.1/M4.1 settle the record
+shape. Rationale below — do not relitigate without new facts.
 
-**Why it's weak (and where it's fine).** Against the **WebAssembly Component
-Model + WIT** (typed, language-agnostic interfaces — what Golem uses), this is
-"stringly-typed syscalls": nothing checks the contract at build time and every
-schema mismatch is a runtime error. *But* JSON-over-pointer is also why capcompute
-is a tiny embeddable library instead of a toolchain — a real part of its posture.
+**Why the uniform envelope wins for a mediation kernel.** Linux syscalls have a
+*uniform* calling convention (number + registers), and that uniformity is
+exactly why `strace`, `seccomp-bpf`, ptrace, and audit interpose on every
+syscall with one generic mechanism. Aurora's differentiation *is* the mediation
+layer: the replay tape, task dispatcher, savepoint decorator, validation, and
+the future flow-policy monitor all work because one self-describing envelope
+passes through one chokepoint. WIT is the opposite trade — per-interface typed
+contracts that are great for application ergonomics but make generic
+interposition expensive (generated hooks or component-value reflection per
+interface). WIT optimizes what Golem sells; the envelope optimizes what Aurora
+sells. Additionally, **wazero does not support the component model**: adopting
+WIT would force abandoning the pure-Go embeddable runtime — the posture itself.
 
-**State of the art.** WIT / component-model typed imports; typed capability
-interfaces generated for each guest language.
+**Weakness honestly retained.** No compile-time guest/host contract; schema
+mismatches surface at runtime. Mitigation: finding C's host-side `InputSchema`
+validation (runtime contract-checking at the monitor, no toolchain needed).
 
-**Plan (flag, don't mandate).** Two independent moves: (1) the cheap, unambiguous
-half is finding C's host-side `InputSchema` validation — get contract-checking at
-runtime without a toolchain. (2) Migrating the ABI to the component model is the
-Golem convergence: real typing, but it trades away the simple embeddable posture
-and is a large change. Evaluate as a deliberate fork, not a default. No roadmap
-number until (1) ships and the tradeoff is decided.
+**ABI v3 = protobuf envelope (successor, PLAN.md).** Migrate the *encoding*,
+keep the *envelope*: one proto message `{abi, name, args, labels, …}` through
+the same chokepoint. The honest motivations, in order:
+1. **Schema evolution** — proto field-number discipline (add freely, never
+   reuse, unknown fields pass through) is best-in-class for long-lived records;
+   this directly serves the versioned-replay fault line (journals outliving
+   program versions).
+2. **A stronger policy substrate** — protovalidate/CEL for typed validation at
+   the reference monitor, and **custom field options as the home for
+   sensitivity/provenance annotations** (per-*field* flow policy for M4, e.g.
+   a field marked secret that `internet.read` args may not carry).
+3. Type safety via codegen (envelope stays polymorphic: per-capability arg
+   messages resolved through the capability registry — same shape as
+   `InputSchema`, typed).
+4. Performance is explicitly *not* the motivation: the boundary is an
+   in-process copy at LLM-turn cadence; JSON costs microseconds against seconds
+   of model latency.
+
+**Caveats for the migration:** (a) TinyGo — the standard Go protobuf runtime is
+reflection-heavy; use codegen-only paths (vtprotobuf-style) for Go guests,
+`prost` for Rust; verify a TinyGo round-trip before committing. (b) Audit
+legibility — binary journals need a `protojson` rendering path so `/journal`
+and audit display stay human-readable. (c) Sequence *after* M3.1 (intent
+records) and M4.1 (labels) — both change the envelope/record shape; migrate the
+format once, after the shape settles. The `abi` version field exists precisely
+so this lands as a clean cut (`abi: 3`), not a flag day.
 
 ## F. Scheduling: no fairness, admission control, priority, or activation
 
