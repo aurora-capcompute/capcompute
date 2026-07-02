@@ -79,10 +79,20 @@ SyscallResult: { "abi": 2,
 The envelope is versioned (`sys.ABIVersion`); the host rejects mismatches with
 errno `bad_abi`. Failures carry a machine-readable errno alongside the human
 message so guests branch on a closed set instead of parsing prose. Two names
-are reserved for savepoint brackets — `sys.begin` / `sys.commit`
+are reserved for **redo scopes** — `sys.begin` / `sys.commit`
 (`sys.SyscallBegin`/`sys.SyscallCommit`), journaled as side-effect-free
 markers with stack semantics; failed-run resume forks the journal past the
-outermost unclosed bracket.
+outermost unclosed bracket. Call them what they are: a redo scope can only
+*re-execute* its contents, never undo them — bracketing non-idempotent,
+un-keyed effects amplifies at-least-once execution (RESEARCH.md finding 9).
+The undo layer is separate: a capability declares its `Compensation`
+(`none` for reads, an inverse syscall, or `escalate`), and aborting a scope
+runs the kernel's saga unwinder (`Unwind`, `saga.go`) — completed effects are
+compensated newest-first, each compensation itself journaled
+(intent/completion, idempotency-keyed, crash-resumable) and composable with
+approval via yield; what cannot be undone mechanically escalates to a human
+with the journal — the terminal compensator. An unwound run is terminal:
+resuming it fails with `RunUnwoundError`.
 
 Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` from
 their entrypoint. **This ABI is your POSIX: version it, keep it small, and treat

@@ -29,6 +29,14 @@ const (
 	KindIntent Kind = "intent"
 	// KindCompletion records the outcome of the immediately preceding intent.
 	KindCompletion Kind = "completion"
+	// KindCompensationIntent records that an inverse syscall is about to
+	// undo the completed effect at the position its Compensates field names.
+	// The first compensation record ends the journal's execution section:
+	// an unwound run is terminal.
+	KindCompensationIntent Kind = "compensation_intent"
+	// KindCompensationCompletion records the outcome of the immediately
+	// preceding compensation intent.
+	KindCompensationCompletion Kind = "compensation_completion"
 )
 
 // Header identifies what wrote a journal: the syscall ABI version, the
@@ -52,6 +60,8 @@ type Record struct {
 	Position int    `json:"position"`
 	Kind     Kind   `json:"kind"`
 	PrevHash string `json:"prev_hash"`
+	// Compensates names the intent position a compensation record undoes.
+	Compensates *int `json:"compensates,omitempty"`
 
 	// Payload: exactly one of the two, by Kind.
 	Syscall *sys.Syscall       `json:"syscall,omitempty"`
@@ -112,6 +122,17 @@ func (e ChainBrokenError) Error() string {
 	return fmt.Sprintf("journal hash chain broken at position %d", e.Position)
 }
 
+// RunUnwoundError means execution replay reached the journal's compensation
+// section: this run was aborted and its effects compensated; it cannot be
+// resumed.
+type RunUnwoundError struct {
+	Position int
+}
+
+func (e RunUnwoundError) Error() string {
+	return fmt.Sprintf("run was unwound: compensation section starts at position %d", e.Position)
+}
+
 // Tape is a journal-backed replay tape.
 type Tape struct {
 	journal Journal
@@ -153,6 +174,9 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 	if err != nil {
 		return sys.SyscallResult{}, false, err
 	}
+	if intent.Kind == KindCompensationIntent || intent.Kind == KindCompensationCompletion {
+		return sys.SyscallResult{}, false, RunUnwoundError{Position: t.cursor}
+	}
 	if intent.Kind != KindIntent || intent.Syscall == nil {
 		return sys.SyscallResult{}, false, CorruptJournalError{Position: t.cursor, Reason: "expected an intent record"}
 	}
@@ -183,6 +207,9 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 	completion, err := t.journal.Load(t.cursor + 1)
 	if err != nil {
 		return sys.SyscallResult{}, false, err
+	}
+	if completion.Kind == KindCompensationIntent || completion.Kind == KindCompensationCompletion {
+		return sys.SyscallResult{}, false, RunUnwoundError{Position: t.cursor + 1}
 	}
 	if completion.Kind != KindCompletion || completion.Result == nil {
 		return sys.SyscallResult{}, false, CorruptJournalError{Position: t.cursor + 1, Reason: "expected a completion record"}
@@ -287,6 +314,18 @@ func Verify(journal Journal) error {
 	if err != nil {
 		return err
 	}
+	// Structure: an execution section of intent/completion pairs (at most one
+	// trailing open intent), optionally followed by a terminal compensation
+	// section of compensation pairs (at most one trailing open compensation
+	// intent). The abort that triggered unwinding may leave the execution
+	// section's last intent open forever — that is legal history.
+	const (
+		wantIntent = iota
+		wantCompletion
+		wantCompensationIntent
+		wantCompensationCompletion
+	)
+	expect := wantIntent
 	for position := 0; position < journal.Length(); position++ {
 		record, err := journal.Load(position)
 		if err != nil {
@@ -295,11 +334,30 @@ func Verify(journal Journal) error {
 		if record.Position != position {
 			return CorruptJournalError{Position: position, Reason: fmt.Sprintf("record carries position %d", record.Position)}
 		}
-		switch {
-		case position%2 == 0 && (record.Kind != KindIntent || record.Syscall == nil):
-			return CorruptJournalError{Position: position, Reason: "expected an intent record"}
-		case position%2 == 1 && (record.Kind != KindCompletion || record.Result == nil):
-			return CorruptJournalError{Position: position, Reason: "expected a completion record"}
+		if (expect == wantIntent || expect == wantCompletion) && record.Kind == KindCompensationIntent {
+			expect = wantCompensationIntent // the execution section is over
+		}
+		switch expect {
+		case wantIntent:
+			if record.Kind != KindIntent || record.Syscall == nil {
+				return CorruptJournalError{Position: position, Reason: "expected an intent record"}
+			}
+			expect = wantCompletion
+		case wantCompletion:
+			if record.Kind != KindCompletion || record.Result == nil {
+				return CorruptJournalError{Position: position, Reason: "expected a completion record"}
+			}
+			expect = wantIntent
+		case wantCompensationIntent:
+			if record.Kind != KindCompensationIntent || record.Syscall == nil || record.Compensates == nil {
+				return CorruptJournalError{Position: position, Reason: "expected a compensation intent record"}
+			}
+			expect = wantCompensationCompletion
+		case wantCompensationCompletion:
+			if record.Kind != KindCompensationCompletion || record.Result == nil {
+				return CorruptJournalError{Position: position, Reason: "expected a compensation completion record"}
+			}
+			expect = wantCompensationIntent
 		}
 		if record.PrevHash != prev {
 			return ChainBrokenError{Position: position}
@@ -316,18 +374,26 @@ func Verify(journal Journal) error {
 // idempotency key handed to drivers. It is deterministic, so a crash-retry of
 // the same intent recomputes the same key.
 func (t *Tape) intentKey(position int, syscall sys.Syscall) (string, error) {
+	return intentKey(t.header, position, syscall)
+}
+
+func (t *Tape) prevHash(position int) (string, error) {
+	return prevHash(t.journal, t.header, position)
+}
+
+func intentKey(header Header, position int, syscall sys.Syscall) (string, error) {
 	return digest(struct {
 		Header   Header      `json:"header"`
 		Position int         `json:"position"`
 		Syscall  sys.Syscall `json:"syscall"`
-	}{t.header, position, syscall})
+	}{header, position, syscall})
 }
 
-func (t *Tape) prevHash(position int) (string, error) {
+func prevHash(journal Journal, header Header, position int) (string, error) {
 	if position == 0 {
-		return digest(t.header)
+		return digest(header)
 	}
-	prev, err := t.journal.Load(position - 1)
+	prev, err := journal.Load(position - 1)
 	if err != nil {
 		return "", err
 	}
