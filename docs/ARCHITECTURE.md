@@ -150,16 +150,23 @@ governance and durability claims *provable* rather than aspirational.
    carry (`Labels`, e.g. `untrusted_web`) and the classes that may not flow
    into their args (`Forbid`); because the guest is opaque, flow is judged
    conservatively — every label a run observes taints everything it later
-   emits. Declassification is an explicit, app-governed operation intended to
-   compose with human approval.
+   emits. Declassification is the reserved `sys.declassify` syscall: every
+   crossing names its labels and a reason, requires a human approval (there
+   is no unapproved path — an unattended declassify would just be flow-policy
+   bypass), and is journaled, so replay re-applies the crossing without
+   asking again.
    *Enforced in code:* the `Validator` decorator (`validate.go`) at the front
-   of the dispatcher chain, plus the provenance pair (`provenance.go`) —
-   `Labeler` below the replay layer (so labels are journaled with each
-   completion) and `FlowMonitor` above it (so a crash-restarted host rebuilds
-   taint exactly from replayed results). Chain order: `Validator` →
-   `FlowMonitor` → replay → `Labeler` → drivers. Reserved markers
-   (`sys.begin`/`sys.commit`) are exempt because they are kernel control
-   syscalls, not capabilities.
+   of the dispatcher chain, plus the provenance set (`provenance.go`) —
+   `Labeler` and `Declassifier` below the replay layer (so labels and
+   approved crossings are journaled) and `FlowMonitor` above it (so a
+   crash-restarted host rebuilds taint exactly from replayed results, and
+   replayed declassifications lift labels in order). The monitor also hands
+   the run's taint downstream (`sys.Taint`) so drivers that store
+   guest-derived data persist its provenance. Chain order: `Validator` →
+   `FlowMonitor` → replay → `Labeler` → `Declassifier` → drivers. Reserved
+   markers (`sys.begin`/`sys.commit`) are exempt because they are kernel
+   control syscalls, not capabilities; `sys.declassify` is *not* exempt — it
+   must be granted like any capability.
 5. **Minimal TCB.** The kernel owns lifecycle, syscall dispatch, and enforcement —
    nothing else. Guard the boundary; helpers do not belong in the kernel.
 

@@ -20,6 +20,12 @@ const (
 	// runs the child; a yielding child yields the parent transitively). The
 	// kernel's Spawner decorator serves it.
 	SyscallSpawn = "sys.spawn"
+	// SyscallDeclassify moves labels out of the run's taint — an explicit,
+	// human-approved crossing of a label boundary (DIFC declassification).
+	// The kernel's Declassifier decorator serves it below the replay layer
+	// (the approved crossing is journaled); the FlowMonitor above applies
+	// the taint removal when the result passes through, fresh or replayed.
+	SyscallDeclassify = "sys.declassify"
 )
 
 // Syscall is the guest-to-host request crossing the syscall boundary.

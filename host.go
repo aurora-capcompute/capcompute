@@ -18,6 +18,10 @@ type hostResponse struct {
 	Code    sys.Errno         `json:"code,omitempty"`
 	Result  json.RawMessage   `json:"result,omitempty"`
 	Message string            `json:"message,omitempty"`
+	// Labels is the result's provenance (sorted source classes). Guests see
+	// where their data came from — a brain can treat untrusted content as
+	// untrusted instead of trusting whatever it reads.
+	Labels []string `json:"labels,omitempty"`
 }
 
 func failResponse(errno sys.Errno, message string) hostResponse {
@@ -78,6 +82,7 @@ func dispatchSyscall[ID comparable, K PID[ID]](
 		Code:    result.Errno(),
 		Result:  result.Result(),
 		Message: result.Message(),
+		Labels:  result.Labels(),
 	})
 }
 
