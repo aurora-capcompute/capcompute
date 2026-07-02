@@ -412,3 +412,35 @@ func digest(v any) (string, error) {
 func sameSyscall(left sys.Syscall, right sys.Syscall) bool {
 	return left.Name == right.Name && bytes.Equal(left.Args, right.Args)
 }
+
+// MemJournal is the in-memory reference Journal — for tests, prototyping, and
+// as the template for durable implementations.
+type MemJournal struct {
+	header    Header
+	hasHeader bool
+	records   []Record
+}
+
+func NewMemJournal() *MemJournal { return &MemJournal{} }
+
+func (j *MemJournal) Header() (Header, bool, error) { return j.header, j.hasHeader, nil }
+
+func (j *MemJournal) SetHeader(header Header) error {
+	j.header = header
+	j.hasHeader = true
+	return nil
+}
+
+func (j *MemJournal) Load(idx int) (Record, error) {
+	if idx < 0 || idx >= len(j.records) {
+		return Record{}, fmt.Errorf("journal: no record at %d", idx)
+	}
+	return j.records[idx], nil
+}
+
+func (j *MemJournal) Append(record Record) error {
+	j.records = append(j.records, record)
+	return nil
+}
+
+func (j *MemJournal) Length() int { return len(j.records) }

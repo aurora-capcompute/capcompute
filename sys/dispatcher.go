@@ -91,3 +91,15 @@ type Dispatcher[K any] interface {
 	Dispatch(ctx context.Context, cred K, syscall Syscall, auth Authorization) (SyscallResult, error)
 	Capabilities() []Capability
 }
+
+// FindCapability resolves a capability by name in a grant set. Every monitor
+// layer (validation, flow policy, labeling, delegation) answers the same
+// question — "what does this name mean in this grant set?" — so it lives here.
+func FindCapability(grants []Capability, name string) (Capability, bool) {
+	for _, capability := range grants {
+		if capability.Name == name {
+			return capability, true
+		}
+	}
+	return Capability{}, false
+}

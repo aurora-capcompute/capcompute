@@ -53,6 +53,14 @@ no preemption; no `Interrupt`: yields are cooperative).
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
 | `journaled.Record` (intent/completion, hash-chained) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
+| `Validator` / `FlowMonitor`+`Taints` | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
+| `Stack` | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
+| `Spawner` / `sys.spawn` | **spawn(2)** | child processes with attenuated authority; deterministic child identity from the intent key |
+| `Messenger` / `sys.send`+`sys.recv` | **Pipes / message queues** | journaled twice, once per side: send = effect, receive = positionally-replayed input event |
+| `sched.Scheduler` | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency (the instance is cache, the journal is the process) |
+| `sched.Supervisor` | **OTP supervision** | restart = stop + resubmit; replay makes restarts lose nothing |
+| `Throttle`+`RateLimit` | **Resource limits** (aggregate) | delays, never denies — a wall-clock refusal would be guest-visible nondeterminism |
+| `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, subtree-chrooted, provenance-labelled, versioned (CAS) shared state |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
 > (which would shadow Go's stdlib).
@@ -171,7 +179,11 @@ governance and durability claims *provable* rather than aspirational.
    replayed declassifications lift labels in order). The monitor also hands
    the run's taint downstream (`sys.Taint`) so drivers that store
    guest-derived data persist its provenance. Chain order: `Validator` →
-   `FlowMonitor` → replay → `Labeler` → `Declassifier` → drivers. Reserved
+   `Throttle` → `FlowMonitor` → replay → `Labeler` → `Declassifier` →
+   `Messenger` → `Spawner` → drivers — encoded in `Stack.ForRun`
+   (`stack.go`), so assembling a chain with a layer on the wrong side of the
+   replay boundary is a construction you cannot express, not a rule you must
+   remember. Reserved
    markers (`sys.begin`/`sys.commit`) are exempt because they are kernel
    control syscalls, not capabilities; `sys.declassify` is *not* exempt — it
    must be granted like any capability.

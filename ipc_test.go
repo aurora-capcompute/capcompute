@@ -116,7 +116,7 @@ func TestIPCUnderReplay(t *testing.T) {
 	mailbox := NewMemMailbox[string]()
 	messenger := newMessenger(mailbox)
 
-	chain := func(t *testing.T, journal *memJournal, run string) sys.Dispatcher[testPID] {
+	chain := func(t *testing.T, journal *journaled.MemJournal, run string) sys.Dispatcher[testPID] {
 		t.Helper()
 		tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: run})
 		if err != nil {
@@ -127,7 +127,7 @@ func TestIPCUnderReplay(t *testing.T) {
 	send := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSend, Args: json.RawMessage(`{"to":"bob","payload":"hi"}`)}
 	recv := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallRecv}
 
-	aliceJournal, bobJournal := &memJournal{}, &memJournal{}
+	aliceJournal, bobJournal := journaled.NewMemJournal(), journaled.NewMemJournal()
 	if _, err := chain(t, aliceJournal, "alice").Dispatch(context.Background(), testPID{id: "alice"}, send, sys.Authorization{}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestIPCUnderReplay(t *testing.T) {
 	if extra := ipcDispatch(t, messenger, "bob", "k-extra", sys.SyscallRecv, ""); extra.Status() != sys.StatusYield {
 		t.Fatalf("replayed send duplicated a delivery: %#v", extra)
 	}
-	for _, journal := range []*memJournal{aliceJournal, bobJournal} {
+	for _, journal := range []*journaled.MemJournal{aliceJournal, bobJournal} {
 		if err := journaled.Verify(journal); err != nil {
 			t.Fatalf("verify: %v", err)
 		}

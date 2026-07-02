@@ -19,6 +19,7 @@ func (p schedPID) PID() string { return p.id }
 // on `done` until the test finishes the quantum with a result.
 type quantum struct {
 	pid  string
+	ctx  context.Context
 	done chan capcompute.ResumeResult[schedPID]
 }
 
@@ -47,7 +48,7 @@ func (h *harness) config() sched.Config[string, schedPID] {
 			return &capcompute.Process[schedPID]{Cred: schedPID{id: pid}}, nil
 		},
 		Resume: func(ctx context.Context, process *capcompute.Process[schedPID]) (<-chan capcompute.ResumeResult[schedPID], error) {
-			started := quantum{pid: process.Cred.PID(), done: make(chan capcompute.ResumeResult[schedPID], 1)}
+			started := quantum{pid: process.Cred.PID(), ctx: ctx, done: make(chan capcompute.ResumeResult[schedPID], 1)}
 			results := make(chan capcompute.ResumeResult[schedPID], 1)
 			go func() {
 				select {
@@ -392,5 +393,36 @@ func TestStopCancelsRunningQuantum(t *testing.T) {
 	result := await(t, results)
 	if result.Status != capcompute.ResumeStopped || !errors.Is(result.Err, context.Canceled) {
 		t.Fatalf("cancelled result = %+v", result)
+	}
+}
+
+// Regression: a quantum started by a *finishing* quantum's reschedule (or by
+// a since-cancelled Submit context) must not inherit a dead context — quanta
+// derive from the scheduler's own lifetime.
+func TestQuantumContextOutlivesItsTrigger(t *testing.T) {
+	h := newHarness()
+	scheduler, err := sched.New(h.config())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer scheduler.Close()
+
+	submitCtx, cancelSubmit := context.WithCancel(context.Background())
+	blockerResults, _ := scheduler.Submit(submitCtx, "blocker", "acme", sched.Normal)
+	blocker := h.next(t)
+	queuedResults, _ := scheduler.Submit(submitCtx, "queued", "acme", sched.Normal)
+	cancelSubmit() // the submitter goes away; its work must not
+
+	blocker.done <- completed()
+	await(t, blockerResults)
+
+	queued := h.next(t) // started by the blocker's finish()
+	time.Sleep(20 * time.Millisecond)
+	if queued.ctx.Err() != nil {
+		t.Fatalf("chained quantum's context died with its trigger: %v", queued.ctx.Err())
+	}
+	queued.done <- completed()
+	if result := await(t, queuedResults); result.Status != capcompute.ResumeCompleted {
+		t.Fatalf("chained quantum result = %+v, want completed", result)
 	}
 }

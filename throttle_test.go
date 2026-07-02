@@ -18,10 +18,10 @@ type throttleClock struct {
 
 func newThrottled(rate, burst float64) (*Throttle[testPID], *throttleClock, *recordingDispatcher) {
 	next := &recordingDispatcher{}
-	throttle := NewThrottle(rate, burst, func(cred testPID) string { return cred.id }, next)
+	limit := NewRateLimit(rate, burst)
 	clock := &throttleClock{now: time.Unix(1_700_000_000, 0)}
-	throttle.now = func() time.Time { return clock.now }
-	throttle.sleep = func(ctx context.Context, d time.Duration) error {
+	limit.now = func() time.Time { return clock.now }
+	limit.sleep = func(ctx context.Context, d time.Duration) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -29,7 +29,7 @@ func newThrottled(rate, burst float64) (*Throttle[testPID], *throttleClock, *rec
 		clock.now = clock.now.Add(d)
 		return nil
 	}
-	return throttle, clock, next
+	return NewThrottle(limit, func(cred testPID) string { return cred.id }, next), clock, next
 }
 
 func throttledCall(t *testing.T, throttle *Throttle[testPID], ctx context.Context, pid string) error {

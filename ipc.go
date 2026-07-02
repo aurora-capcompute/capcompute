@@ -115,7 +115,7 @@ func (m *Messenger[ID, K]) send(ctx context.Context, cred K, syscall sys.Syscall
 	senderGrants := m.config.Grants(cred)
 	requested := make([]sys.Capability, 0, len(request.Capabilities))
 	for _, name := range request.Capabilities {
-		granted, ok := findCapability(senderGrants, name)
+		granted, ok := sys.FindCapability(senderGrants, name)
 		if !ok {
 			return sys.FailCode(sys.ErrnoDenied, fmt.Sprintf("send: sender does not hold capability %q", name)), nil
 		}

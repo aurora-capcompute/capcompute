@@ -17,7 +17,6 @@ import (
 
 	"github.com/aurora-capcompute/capcompute"
 	"github.com/aurora-capcompute/capcompute/sys"
-	"github.com/aurora-capcompute/capcompute/sys/replay"
 	"github.com/aurora-capcompute/capcompute/sys/replay/tape/journaled"
 )
 
@@ -29,35 +28,17 @@ type PID struct{ ID string }
 
 func (p PID) PID() string { return p.ID }
 
-// Journal is an in-memory journaled.Journal with fault injection: when
-// CrashAt equals the number of appends performed so far, the append fails
-// atomically (nothing is persisted) with ErrCrash — the process died.
+// Journal is journaled.MemJournal plus fault injection: when CrashAt equals
+// the number of appends performed so far, the append fails atomically
+// (nothing is persisted) with ErrCrash — the process died.
 type Journal struct {
-	header    journaled.Header
-	hasHeader bool
-	records   []journaled.Record
-
+	*journaled.MemJournal
 	appends int
 	CrashAt int // -1 = never
 }
 
 func NewJournal() *Journal {
-	return &Journal{CrashAt: -1}
-}
-
-func (j *Journal) Header() (journaled.Header, bool, error) { return j.header, j.hasHeader, nil }
-
-func (j *Journal) SetHeader(header journaled.Header) error {
-	j.header = header
-	j.hasHeader = true
-	return nil
-}
-
-func (j *Journal) Load(idx int) (journaled.Record, error) {
-	if idx < 0 || idx >= len(j.records) {
-		return journaled.Record{}, fmt.Errorf("journal: no record at %d", idx)
-	}
-	return j.records[idx], nil
+	return &Journal{MemJournal: journaled.NewMemJournal(), CrashAt: -1}
 }
 
 func (j *Journal) Append(record journaled.Record) error {
@@ -65,11 +46,8 @@ func (j *Journal) Append(record journaled.Record) error {
 		return ErrCrash
 	}
 	j.appends++
-	j.records = append(j.records, record)
-	return nil
+	return j.MemJournal.Append(record)
 }
-
-func (j *Journal) Length() int { return len(j.records) }
 
 // Effects is the external world: a keyed effect store, the way a real driver
 // dedups at-least-once dispatch. It survives crashes — an effect applied
@@ -145,9 +123,10 @@ func (d driver) Dispatch(ctx context.Context, _ PID, syscall sys.Syscall, _ sys.
 
 func (d driver) Capabilities() []sys.Capability { return Capabilities() }
 
-// Chain builds the full dispatcher chain over the world, exactly as a real
-// deployment stacks it. Fails with journaled.ReplayIncompatibleError etc. via
-// the returned error.
+// Chain builds the canonical dispatcher stack over the world, exactly as a
+// real deployment does — via Stack.ForRun, so the sim's crash matrix
+// exercises the same layer order production runs. Fails with
+// journaled.ReplayIncompatibleError etc. via the returned error.
 func Chain(world *World, run string) (sys.Dispatcher[PID], error) {
 	tape, err := journaled.NewTape(world.Journal, journaled.Header{
 		ABI:     sys.ABIVersion,
@@ -157,11 +136,11 @@ func Chain(world *World, run string) (sys.Dispatcher[PID], error) {
 	if err != nil {
 		return nil, err
 	}
-	grants := func(PID) []sys.Capability { return Capabilities() }
-	return capcompute.NewValidator(grants,
-		capcompute.NewFlowMonitor[string, PID](
-			replay.NewDispatcher[PID](tape,
-				capcompute.NewLabeler[PID](driver{effects: world.Effects})))), nil
+	stack := capcompute.Stack[string, PID]{
+		Grants: func(PID) []sys.Capability { return Capabilities() },
+		Taints: capcompute.NewTaints[string](), // fresh per boot: a crash loses host memory
+	}
+	return stack.ForRun(tape, driver{effects: world.Effects})
 }
 
 // Run boots a fresh host process over the surviving world and drives the

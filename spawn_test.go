@@ -141,7 +141,7 @@ func TestSpawnMapsChildOutcomes(t *testing.T) {
 // re-enters via the same derived cred, a completed child's result is journaled,
 // and a replayed parent never re-spawns.
 func TestSpawnUnderReplay(t *testing.T) {
-	journal := &memJournal{}
+	journal := journaled.NewMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:parent", Run: "parent"}
 	runner := &fakeRunner{results: []ResumeResult[testPID]{
 		{Status: ResumeYielded},

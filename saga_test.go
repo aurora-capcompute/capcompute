@@ -10,25 +10,6 @@ import (
 	"github.com/aurora-capcompute/capcompute/sys/replay/tape/journaled"
 )
 
-type memJournal struct {
-	header    journaled.Header
-	hasHeader bool
-	records   []journaled.Record
-}
-
-func (j *memJournal) Header() (journaled.Header, bool, error) { return j.header, j.hasHeader, nil }
-func (j *memJournal) SetHeader(header journaled.Header) error {
-	j.header = header
-	j.hasHeader = true
-	return nil
-}
-func (j *memJournal) Load(idx int) (journaled.Record, error) { return j.records[idx], nil }
-func (j *memJournal) Append(record journaled.Record) error {
-	j.records = append(j.records, record)
-	return nil
-}
-func (j *memJournal) Length() int { return len(j.records) }
-
 type sagaCall struct {
 	Syscall sys.Syscall
 	Key     string
@@ -56,9 +37,9 @@ var sagaCaps = []sys.Capability{
 }
 
 // executedJournal journals three completed effects: clock.now, transfer.out, mail.send.
-func executedJournal(t *testing.T) *memJournal {
+func executedJournal(t *testing.T) *journaled.MemJournal {
 	t.Helper()
-	journal := &memJournal{}
+	journal := journaled.NewMemJournal()
 	tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "run-1"})
 	if err != nil {
 		t.Fatalf("new tape: %v", err)

@@ -49,7 +49,7 @@ func (v *Validator[K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall
 		return v.next.Dispatch(ctx, cred, syscall, auth)
 	}
 
-	granted, ok := findCapability(v.grants(cred), syscall.Name)
+	granted, ok := sys.FindCapability(v.grants(cred), syscall.Name)
 	if !ok {
 		return sys.FailCode(sys.ErrnoDenied, fmt.Sprintf("capability %q is not granted", syscall.Name)), nil
 	}
@@ -102,13 +102,4 @@ func (v *Validator[K]) compiled(raw []byte) (*jsonschema.Schema, error) {
 	}
 	v.schemas[string(raw)] = schema
 	return schema, nil
-}
-
-func findCapability(grants []sys.Capability, name string) (sys.Capability, bool) {
-	for _, capability := range grants {
-		if capability.Name == name {
-			return capability, true
-		}
-	}
-	return sys.Capability{}, false
 }

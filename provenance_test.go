@@ -47,7 +47,7 @@ func TestLabelerStampsDerivingCapabilityAndClasses(t *testing.T) {
 }
 
 func TestFlowMonitorBlocksTaintedFlow(t *testing.T) {
-	monitor := NewFlowMonitor[string](NewLabeler[testPID](flowDriver{}))
+	monitor := NewFlowMonitor(NewTaints[string](), NewLabeler[testPID](flowDriver{}))
 
 	// Before any taint the protected capability is callable.
 	if result := call(t, monitor, "p1", "k8s.delete"); result.Status() != sys.StatusResult {
@@ -75,13 +75,14 @@ func TestFlowMonitorBlocksTaintedFlow(t *testing.T) {
 }
 
 func TestFlowMonitorDeclassify(t *testing.T) {
-	monitor := NewFlowMonitor[string](NewLabeler[testPID](flowDriver{}))
+	taints := NewTaints[string]()
+	monitor := NewFlowMonitor(taints, NewLabeler[testPID](flowDriver{}))
 	call(t, monitor, "p1", "internet.read")
 
 	if result := call(t, monitor, "p1", "k8s.delete"); result.Errno() != sys.ErrnoDenied {
 		t.Fatalf("expected denial before declassification, got %#v", result)
 	}
-	monitor.Declassify("p1", "untrusted_web")
+	taints.Declassify("p1", "untrusted_web")
 	if result := call(t, monitor, "p1", "k8s.delete"); result.Status() != sys.StatusResult {
 		t.Fatalf("declassified k8s.delete = %#v, want result", result)
 	}
@@ -91,7 +92,7 @@ func TestFlowMonitorDeclassify(t *testing.T) {
 // the journal, and a crash-restarted host must rebuild the run's taint from
 // replayed results alone.
 func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
-	journal := &memJournal{}
+	journal := journaled.NewMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
 
 	newChain := func(t *testing.T) *FlowMonitor[string, testPID] {
@@ -100,7 +101,7 @@ func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
 		if err != nil {
 			t.Fatalf("new tape: %v", err)
 		}
-		return NewFlowMonitor[string](replay.NewDispatcher[testPID](tape, NewLabeler[testPID](flowDriver{})))
+		return NewFlowMonitor(NewTaints[string](), replay.NewDispatcher[testPID](tape, NewLabeler[testPID](flowDriver{})))
 	}
 
 	first := newChain(t)
@@ -133,7 +134,7 @@ func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
 // unapproved sys.declassify yields for a human; the approved crossing is
 // journaled; a crash-replay re-applies it without asking again.
 func TestDeclassifySyscallLifecycle(t *testing.T) {
-	journal := &memJournal{}
+	journal := journaled.NewMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
 	newChain := func(t *testing.T) *FlowMonitor[string, testPID] {
 		t.Helper()
@@ -141,7 +142,7 @@ func TestDeclassifySyscallLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("new tape: %v", err)
 		}
-		return NewFlowMonitor[string](
+		return NewFlowMonitor(NewTaints[string](),
 			replay.NewDispatcher[testPID](tape,
 				NewLabeler[testPID](NewDeclassifier[testPID](flowDriver{}))))
 	}
@@ -238,7 +239,7 @@ func TestFlowMonitorHandsTaintDownstream(t *testing.T) {
 		}
 		return sys.Result(nil), nil
 	})
-	monitor := NewFlowMonitor[string](NewLabeler[testPID](probe))
+	monitor := NewFlowMonitor(NewTaints[string](), NewLabeler[testPID](probe))
 
 	call(t, monitor, "p1", "internet.read")
 	call(t, monitor, "p1", "mail.send")

@@ -34,7 +34,7 @@ func (l *Labeler[K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, 
 		return result, nil // kernel control syscalls carry no data provenance
 	}
 	labels := []string{"syscall:" + syscall.Name}
-	if capability, ok := findCapability(l.next.Capabilities(), syscall.Name); ok {
+	if capability, ok := sys.FindCapability(l.next.Capabilities(), syscall.Name); ok {
 		labels = append(labels, capability.Labels...)
 	}
 	return result.WithLabels(labels...), nil
@@ -44,110 +44,60 @@ func (l *Labeler[K]) Capabilities() []sys.Capability {
 	return l.next.Capabilities()
 }
 
-// FlowMonitor enforces information-flow policy at the reference monitor
-// (the CaMeL architecture as a kernel primitive). The guest is opaque, so
-// flow is judged conservatively: every label a run observes taints everything
-// it later emits. A syscall to a capability whose Forbid set intersects the
-// run's accumulated taint is refused with ErrnoDenied before any driver runs.
-//
-// It sits *above* the replay layer: replayed results flow through it, so a
-// crash-restarted host rebuilds the run's taint from the journal exactly.
-//
-// Chain order: Validator → FlowMonitor → replay → Labeler → drivers.
-type FlowMonitor[ID comparable, K PID[ID]] struct {
-	next sys.Dispatcher[K]
-
+// Taints is the cross-run taint state: every label each run has observed.
+// It is shared by all of a host's per-run monitor chains (Stack holds one),
+// while the FlowMonitor decorator that consumes it is wired per run — state
+// and wiring have different lifetimes, so they are different types.
+type Taints[ID comparable] struct {
 	mu       sync.Mutex
 	observed map[ID]map[string]struct{}
 }
 
-func NewFlowMonitor[ID comparable, K PID[ID]](next sys.Dispatcher[K]) *FlowMonitor[ID, K] {
-	return &FlowMonitor[ID, K]{
-		next:     next,
-		observed: make(map[ID]map[string]struct{}),
-	}
-}
-
-func (m *FlowMonitor[ID, K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
-	switch syscall.Name {
-	case sys.SyscallBegin, sys.SyscallCommit:
-		return m.next.Dispatch(ctx, cred, syscall, auth)
-	}
-
-	pid := cred.PID()
-	if capability, ok := findCapability(m.next.Capabilities(), syscall.Name); ok && len(capability.Forbid) > 0 {
-		if tainted := m.intersection(pid, capability.Forbid); len(tainted) > 0 {
-			return sys.FailCode(sys.ErrnoDenied, fmt.Sprintf(
-				"flow policy: this run has observed %v, which may not flow into %q", tainted, syscall.Name)), nil
-		}
-	}
-
-	// Hand the run's taint downstream: drivers that store guest-derived data
-	// (tenant memory) persist it with the value, so provenance survives into
-	// later threads instead of being laundered.
-	result, err := m.next.Dispatch(sys.WithTaint(ctx, m.taintOf(pid)), cred, syscall, auth)
-	if err != nil {
-		return result, err
-	}
-	if syscall.Name == sys.SyscallDeclassify && result.Status() == sys.StatusResult {
-		// The approved, journaled crossing — fresh or replayed — lifts the
-		// labels instead of accumulating them.
-		var crossed DeclassifyResult
-		if err := json.Unmarshal(result.Result(), &crossed); err != nil {
-			return sys.SyscallResult{}, fmt.Errorf("decode declassify result: %w", err)
-		}
-		m.Declassify(pid, crossed.Declassified...)
-		return result, nil
-	}
-	m.observe(pid, result.Labels())
-	return result, nil
-}
-
-func (m *FlowMonitor[ID, K]) Capabilities() []sys.Capability {
-	return m.next.Capabilities()
+func NewTaints[ID comparable]() *Taints[ID] {
+	return &Taints[ID]{observed: make(map[ID]map[string]struct{})}
 }
 
 // Declassify removes labels from a run's accumulated taint — an explicit,
 // governed crossing of a label boundary (DIFC declassification). Guests reach
 // it through the sys.declassify syscall (the Declassifier decorator), whose
-// approved result replays through Dispatch and lands here; the direct method
-// remains for host-side administrative use.
-func (m *FlowMonitor[ID, K]) Declassify(pid ID, labels ...string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	taint := m.observed[pid]
+// approved result replays through the FlowMonitor and lands here; the direct
+// method remains for host-side administrative use.
+func (t *Taints[ID]) Declassify(pid ID, labels ...string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	taint := t.observed[pid]
 	for _, label := range labels {
 		delete(taint, label)
 	}
 }
 
 // ForgetRun releases a terminated run's taint state.
-func (m *FlowMonitor[ID, K]) ForgetRun(pid ID) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.observed, pid)
+func (t *Taints[ID]) ForgetRun(pid ID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.observed, pid)
 }
 
-func (m *FlowMonitor[ID, K]) observe(pid ID, labels []string) {
+func (t *Taints[ID]) observe(pid ID, labels []string) {
 	if len(labels) == 0 {
 		return
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	taint := m.observed[pid]
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	taint := t.observed[pid]
 	if taint == nil {
 		taint = make(map[string]struct{})
-		m.observed[pid] = taint
+		t.observed[pid] = taint
 	}
 	for _, label := range labels {
 		taint[label] = struct{}{}
 	}
 }
 
-func (m *FlowMonitor[ID, K]) intersection(pid ID, forbid []string) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	taint := m.observed[pid]
+func (t *Taints[ID]) intersection(pid ID, forbid []string) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	taint := t.observed[pid]
 	var tainted []string
 	for _, label := range forbid {
 		if _, ok := taint[label]; ok {
@@ -158,16 +108,74 @@ func (m *FlowMonitor[ID, K]) intersection(pid ID, forbid []string) []string {
 	return tainted
 }
 
-func (m *FlowMonitor[ID, K]) taintOf(pid ID) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	taint := m.observed[pid]
+func (t *Taints[ID]) snapshot(pid ID) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	taint := t.observed[pid]
 	labels := make([]string, 0, len(taint))
 	for label := range taint {
 		labels = append(labels, label)
 	}
 	sort.Strings(labels)
 	return labels
+}
+
+// FlowMonitor enforces information-flow policy at the reference monitor
+// (the CaMeL architecture as a kernel primitive). The guest is opaque, so
+// flow is judged conservatively: every label a run observes taints everything
+// it later emits. A syscall to a capability whose Forbid set intersects the
+// run's accumulated taint is refused with ErrnoDenied before any driver runs.
+//
+// It sits *above* the replay layer: replayed results flow through it, so a
+// crash-restarted host rebuilds the run's taint from the journal exactly.
+// Taint state is the shared Taints; the monitor itself is per-run wiring
+// (see Stack for the canonical chain).
+type FlowMonitor[ID comparable, K PID[ID]] struct {
+	taints *Taints[ID]
+	next   sys.Dispatcher[K]
+}
+
+func NewFlowMonitor[ID comparable, K PID[ID]](taints *Taints[ID], next sys.Dispatcher[K]) *FlowMonitor[ID, K] {
+	return &FlowMonitor[ID, K]{taints: taints, next: next}
+}
+
+func (m *FlowMonitor[ID, K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
+	switch syscall.Name {
+	case sys.SyscallBegin, sys.SyscallCommit:
+		return m.next.Dispatch(ctx, cred, syscall, auth)
+	}
+
+	pid := cred.PID()
+	if capability, ok := sys.FindCapability(m.next.Capabilities(), syscall.Name); ok && len(capability.Forbid) > 0 {
+		if tainted := m.taints.intersection(pid, capability.Forbid); len(tainted) > 0 {
+			return sys.FailCode(sys.ErrnoDenied, fmt.Sprintf(
+				"flow policy: this run has observed %v, which may not flow into %q", tainted, syscall.Name)), nil
+		}
+	}
+
+	// Hand the run's taint downstream: drivers that store guest-derived data
+	// (tenant memory) persist it with the value, so provenance survives into
+	// later threads instead of being laundered.
+	result, err := m.next.Dispatch(sys.WithTaint(ctx, m.taints.snapshot(pid)), cred, syscall, auth)
+	if err != nil {
+		return result, err
+	}
+	if syscall.Name == sys.SyscallDeclassify && result.Status() == sys.StatusResult {
+		// The approved, journaled crossing — fresh or replayed — lifts the
+		// labels instead of accumulating them.
+		var crossed DeclassifyResult
+		if err := json.Unmarshal(result.Result(), &crossed); err != nil {
+			return sys.SyscallResult{}, fmt.Errorf("decode declassify result: %w", err)
+		}
+		m.taints.Declassify(pid, crossed.Declassified...)
+		return result, nil
+	}
+	m.taints.observe(pid, result.Labels())
+	return result, nil
+}
+
+func (m *FlowMonitor[ID, K]) Capabilities() []sys.Capability {
+	return m.next.Capabilities()
 }
 
 // DeclassifyRequest is the args payload of the reserved sys.declassify

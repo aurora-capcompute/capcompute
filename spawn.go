@@ -87,7 +87,7 @@ func (s *Spawner[K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, 
 	parentGrants := s.config.Grants(cred)
 	requested := make([]sys.Capability, 0, len(request.Capabilities))
 	for _, name := range request.Capabilities {
-		granted, ok := findCapability(parentGrants, name)
+		granted, ok := sys.FindCapability(parentGrants, name)
 		if !ok {
 			return sys.FailCode(sys.ErrnoDenied, fmt.Sprintf("spawn: parent does not hold capability %q", name)), nil
 		}
@@ -147,12 +147,21 @@ func (s *Spawner[K]) Capabilities() []sys.Capability {
 // registers it in the process table (the syscall path finds it by PID), gives
 // it the CPU, and closes it once its quantum ends. childDispatcher wires the
 // child's own chain — its journal tape (keyed by the child's PID), validator,
-// and drivers over exactly the granted set.
+// and drivers over exactly the granted set (Stack.ForRun is the natural fit).
+//
+// A kernel is bound to one program image, so the runner is too: program names
+// what this kernel runs, and a spawn requesting anything else is refused
+// rather than silently running the wrong code. Multi-program apps compose a
+// ChildRunner that routes on request.Program across per-program runners.
 func KernelChildRunner[ID comparable, K PID[ID]](
 	kernel *Kernel[ID, K],
+	program string,
 	childDispatcher func(ctx context.Context, child K, granted []sys.Capability) (sys.Dispatcher[K], error),
 ) ChildRunner[K] {
 	return func(ctx context.Context, child K, granted []sys.Capability, request SpawnRequest) (ResumeResult[K], error) {
+		if request.Program != program {
+			return ResumeResult[K]{}, fmt.Errorf("spawn: this kernel runs %q, not %q", program, request.Program)
+		}
 		dispatcher, err := childDispatcher(ctx, child, granted)
 		if err != nil {
 			return ResumeResult[K]{}, err

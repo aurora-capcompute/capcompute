@@ -94,6 +94,11 @@ type resident[K any] struct {
 // Scheduler is the default fair-share scheduler.
 type Scheduler[ID comparable, K capcompute.PID[ID]] struct {
 	config Config[ID, K]
+	// root is the lifetime every quantum derives from. A Submit's context
+	// governs admission only — tying a quantum to its submitter's context
+	// would let one caller's cancellation kill unrelated queued work.
+	root     context.Context
+	stopRoot context.CancelFunc
 
 	mu       sync.Mutex
 	closed   bool
@@ -123,8 +128,11 @@ func New[ID comparable, K capcompute.PID[ID]](config Config[ID, K]) (*Scheduler[
 	if config.MaxConcurrent <= 0 {
 		config.MaxConcurrent = 1
 	}
+	root, stopRoot := context.WithCancel(context.Background())
 	scheduler := &Scheduler[ID, K]{
 		config:   config,
+		root:     root,
+		stopRoot: stopRoot,
 		entries:  make(map[ID]*entry[ID, K]),
 		byOwner:  make(map[string]int),
 		resident: make(map[ID]*resident[K]),
@@ -145,6 +153,9 @@ func (s *Scheduler[ID, K]) Submit(ctx context.Context, pid ID, owner string, pri
 	if priority < Low || priority > High {
 		return nil, fmt.Errorf("sched: invalid priority %d", priority)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -162,7 +173,7 @@ func (s *Scheduler[ID, K]) Submit(ctx context.Context, pid ID, owner string, pri
 	}
 	s.entries[pid] = submitted
 	s.enqueue(submitted)
-	s.schedule(ctx)
+	s.schedule()
 	return submitted.result, nil
 }
 
@@ -185,10 +196,11 @@ func (s *Scheduler[ID, K]) Close() {
 	s.quanta.Wait()
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for pid, warm := range s.resident {
 		s.dropResident(pid, warm)
 	}
+	s.mu.Unlock()
+	s.stopRoot()
 }
 
 // Stop aborts pid's outstanding submission: a queued quantum is dequeued and
@@ -254,8 +266,10 @@ func (s *Scheduler[ID, K]) enqueue(queued *entry[ID, K]) {
 }
 
 // schedule starts quanta while capacity remains: highest band first, owners
-// round-robin within it, skipping owners at their concurrency quota.
-func (s *Scheduler[ID, K]) schedule(ctx context.Context) {
+// round-robin within it, skipping owners at their concurrency quota. Every
+// quantum derives from the scheduler's root lifetime, never from a caller's
+// context. Caller holds the lock.
+func (s *Scheduler[ID, K]) schedule() {
 	for s.running < s.config.MaxConcurrent {
 		next := s.pick()
 		if next == nil {
@@ -263,7 +277,7 @@ func (s *Scheduler[ID, K]) schedule(ctx context.Context) {
 		}
 		s.running++
 		s.byOwner[next.owner]++
-		quantumCtx, cancel := context.WithCancel(ctx)
+		quantumCtx, cancel := context.WithCancel(s.root)
 		next.cancel = cancel
 		s.quanta.Add(1)
 		go s.runQuantum(quantumCtx, next)
@@ -312,15 +326,15 @@ func (s *Scheduler[ID, K]) runQuantum(ctx context.Context, running *entry[ID, K]
 
 	process, err := s.checkout(ctx, running)
 	if err != nil {
-		s.finish(ctx, running, nil, capcompute.ResumeResult[K]{Status: capcompute.ResumeFailed, Err: err})
+		s.finish(running, nil, capcompute.ResumeResult[K]{Status: capcompute.ResumeFailed, Err: err})
 		return
 	}
 	results, err := s.config.Resume(ctx, process)
 	if err != nil {
-		s.finish(ctx, running, process, capcompute.ResumeResult[K]{Status: capcompute.ResumeFailed, Err: err})
+		s.finish(running, process, capcompute.ResumeResult[K]{Status: capcompute.ResumeFailed, Err: err})
 		return
 	}
-	s.finish(ctx, running, process, <-results)
+	s.finish(running, process, <-results)
 }
 
 // checkout returns the warm process or activates a cold one, marking it
@@ -351,7 +365,7 @@ func (s *Scheduler[ID, K]) checkout(ctx context.Context, running *entry[ID, K]) 
 // finish releases the quantum's slot, delivers its result, and applies the
 // actor lifecycle: a yielded process stays warm (subject to eviction); a
 // terminated one is deactivated immediately.
-func (s *Scheduler[ID, K]) finish(ctx context.Context, ran *entry[ID, K], process *capcompute.Process[K], result capcompute.ResumeResult[K]) {
+func (s *Scheduler[ID, K]) finish(ran *entry[ID, K], process *capcompute.Process[K], result capcompute.ResumeResult[K]) {
 	s.mu.Lock()
 	s.running--
 	s.byOwner[ran.owner]--
@@ -369,7 +383,7 @@ func (s *Scheduler[ID, K]) finish(ctx context.Context, ran *entry[ID, K], proces
 		}
 	}
 	if !s.closed {
-		s.schedule(ctx)
+		s.schedule()
 	}
 	s.mu.Unlock()
 
