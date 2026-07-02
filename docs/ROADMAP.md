@@ -17,6 +17,8 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 6 | ABI v2 bundle: version field, errnos, savepoint syscalls | M | S | **done** (`sys.ABIVersion=2`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 7 | Snapshot/checkpoint to bound replay cost | M | L | deferred |
 | 8 | Sources-as-inbound-drivers refactor (aurora-k8s-agent) | M | M | deferred |
+| 9 | Intent/completion journal records (journal-before-execute) | H | M | open — next |
+| 10 | Compensation metadata + saga unwinding | H | M | open — after #9 |
 
 ## 0. Ambient-surface lockdown
 
@@ -99,3 +101,28 @@ sources with the driver symmetry (`ARCHITECTURE.md`, *Drivers: the symmetry*).
 Deferred because aurora-k8s-agent is blocked on out-of-scope module migrations
 (`aurora-capcompute`, `aurora-stores`) before it can adopt the renamed API at
 all; do the refactor as part of that migration, not before.
+
+## 9. Intent/completion journal records
+
+Today the tape records a syscall only after the driver executed it: the
+journal is write-ahead with respect to the guest but write-*behind* with
+respect to the world (RESEARCH.md finding 8). Fix: append an **intent record**
+before dispatch and a **completion record** after. Replay meeting an open
+intent at the tail is a typed *indeterminate* condition (not divergence) with
+per-capability policy; open intent + pending task = legitimately waiting. The
+intent identity `(PID, position, call-hash)` doubles as an idempotency key
+handed to drivers. Splits invariant #3 into two laws: journal-before-observe
+(held today) and **journal-before-execute** (new). Cost: two appends per
+effectful syscall; classify capabilities (`effectful` vs read) later.
+
+## 10. Compensation metadata + saga unwinding
+
+`sys.begin`/`sys.commit` are **redo scopes**, not savepoints — they can only
+re-execute, never undo, and re-execution amplifies at-least-once (RESEARCH.md
+finding 9). Add the missing layers: a declared **compensation** on
+`sys.Capability` (inverse syscall or explicit cannot-compensate); kernel-level
+**saga unwinding** — on abort of a scope, dispatch completed effects'
+compensations in reverse, journaled and composable with approval; TCC-shaped
+reservations where the effect side supports drafts/dry-runs; and escalation
+to the human (with the journal) as the first-class terminal compensator.
+Depends on #9 for the completed-effect records unwinding walks.

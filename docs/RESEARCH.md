@@ -203,13 +203,94 @@ alongside the ABI version field so it is one wire change.
   The boundary is in-process, so there is no crossing cost to amortize; do
   *not* move batching into the kernel ABI (non-goals).
 
+## 8. The journal is write-behind with respect to the world — adopt intent records
+
+**Today.** The replay tape records a syscall only *after* the driver executed
+it: tape check → execute the side effect → `Record`. Invariant #3
+(journal-before-observe) holds for the **guest** — it never acts on an
+unrecorded result — but with respect to the **world** the journal is
+write-*behind*. The crash window between execute and commit has three
+consequences: (a) duplicate execution on replay (at-least-once; the README
+already admits the cancellation case); (b) "never attempted" and "attempted,
+outcome unknown" are indistinguishable — both are an absent record; (c) an
+executed-but-uncommitted action is invisible to the audit trail, a hole
+exactly where the governance value proposition lives.
+
+**Prior art.** The ARIES/WAL rule: log the intent before performing the
+action. Temporal journals **two events per activity** — `ActivityTaskScheduled`
+(intent) then `ActivityTaskCompleted` (outcome). Two-generals makes
+exactly-once external effects impossible; the achievable contract is *visible*
+at-least-once, upgraded to effectively-once via an **idempotency key** the
+downstream can deduplicate on. The task layer already computes the right key:
+`(PID, journal position, call-hash)`.
+
+**Verdict: adopt (highest-value open item).** The tape appends an **intent
+record** before dispatch and a **completion record** after. Replay meeting an
+open intent at the tail is a new typed condition — *indeterminate*, not
+divergence — with per-capability policy (fail for human review on mutations;
+retry on reads). Disambiguation: open intent + pending task = legitimately
+waiting; open intent + no task = indeterminate. The intent identity doubles as
+an idempotency key handed to drivers. Splits invariant #3 into two laws:
+*journal-before-observe* (guest side, held today) and **journal-before-execute**
+(world side, the new one). Cost: two appends per effectful syscall — classify
+capabilities (`effectful` vs read) later; intent-log everything first.
+
+## 9. Savepoints are redo scopes, not transactions — add the missing layers
+
+**Today.** `sys.begin`/`sys.commit` bracket a unit; on failed-run resume the
+journal forks past the outermost open bracket and the unit **re-executes**.
+That is a *redo scope* (checkpoint-restart), not a savepoint: SQL savepoints
+promise rollback — undo — and this mechanism cannot undo anything. Worse,
+bracket recovery *deliberately re-executes possibly-completed effects*, so
+brackets amplify the at-least-once problem of finding 8 and are only safe over
+idempotent contents — which nothing enforces.
+
+**Prior art — the problem has a four-layer answer, and Aurora has one layer:**
+1. *Effectively-once floor*: intent records + idempotency keys (finding 8).
+2. *Real transactions for system-owned state only*: Beldi (OSDI '20), Boki
+   (SOSP '21), Halfmoon (SOSP '23), Styx — exactly-once/ACID by keeping state
+   inside the system and paying 2PC/locking latency. Fundamentally cannot
+   cover external effects (a k8s apply, a sent message).
+3. *External effects*: **Sagas** (Garcia-Molina & Salem 1987) — each step
+   declares a **compensating action**; on abort, completed steps are
+   compensated in reverse. The canonical, industry-converged answer (Temporal,
+   BPEL). Compensation is *declared, never inferred* — no research solves
+   automatic inverse-derivation. Where the downstream cooperates,
+   **Try-Confirm/Cancel** reservations beat compensation (reserve → confirm).
+4. *The agent frontier*: SagaLLM (VLDB 2025) applies sagas to multi-agent LLM
+   planning; checkpoint-restore security work (ACRFence) states the boundary
+   that applies to our journal-fork exactly: restoring process state **cannot
+   undo actions already performed on external services**.
+
+**Verdict: keep brackets, reframe them honestly, add compensation.**
+- Document `sys.begin`/`sys.commit` as **redo scopes**; bracket re-execution
+  should require the finding-8 idempotency floor (flag brackets over
+  non-idempotent, un-keyed effects).
+- Add declared **compensation to `sys.Capability`** (the inverse syscall, or
+  an explicit cannot-compensate marker). The kernel gains **saga unwinding**:
+  on abort of a scope, dispatch completed effects' compensations in reverse —
+  each journaled, audit-visible, and composable with approval (compensating an
+  approved action can itself require approval).
+- **TCC maps onto the approval flow** — `require_approval` is already
+  reserve-then-confirm on the human side; extend the shape to the effect side
+  (drafts/dry-runs confirmed after approval).
+- **The human is the terminal compensator**: the last rung of every
+  compensation ladder is escalation with the journal of what happened — make
+  it a first-class outcome, not an implicit failure.
+
+Strategic note: kernel-level, capability-declared compensation with governed
+unwinding exists in the literature only as patterns and papers (SagaLLM is not
+a runtime). This layer is genuinely near the frontier.
+
 ## Apply order
 
-1. **Ambient-surface lockdown (finding 1)** — new ROADMAP #0; small, closes
-   the only law-level hole, and makes ROADMAP #2's determinism tests honest.
-2. ROADMAP #1/#2 as planned (journal versioning, kernel-law tests — extended
-   with the grantless-guest and clock-across-replay assertions).
-3. Task `Kind` field (finding 2) — cheap, do with the next runtime touch.
-4. Attenuation contract + grant epochs (finding 4) with ROADMAP #4.
-5. ABI v2 bundle (findings 3 + 6 + ROADMAP #6): version field, error codes,
-   savepoint syscalls — one coordinated wire change.
+1. ~~**Ambient-surface lockdown (finding 1)**~~ — done (ROADMAP #0).
+2. ~~ROADMAP #1 (journal versioning)~~ done; #2 partial (laws 1/2 tested).
+3. ~~ABI v2 bundle (findings 3 + 6)~~ — done.
+4. **Intent/completion records (finding 8)** — ROADMAP #9; the
+   highest-value open item: closes the audit hole and provides the
+   idempotency floor that findings 9 and spawn both assume.
+5. **Compensation metadata + saga unwinding (finding 9)** — ROADMAP #10;
+   after #9 (unwinding walks completed-effect records).
+6. Task `Kind` field (finding 2) and attenuation-at-grant + epochs
+   (finding 4) — with the runtime migration.
