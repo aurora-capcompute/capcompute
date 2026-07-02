@@ -10,29 +10,17 @@ import (
 	"time"
 
 	"github.com/extism/go-pdk"
+
+	"github.com/aurora-capcompute/capcompute/sys/wire"
 )
 
 //go:wasmimport extism:host/compute syscall
 func hostSyscall(uint64) uint64
 
-const abiVersion = 2
+const abiVersion = 3
 
 type input struct {
 	Mode string `json:"mode"`
-}
-
-type syscall struct {
-	Abi  int             `json:"abi"`
-	Name string          `json:"name"`
-	Args json.RawMessage `json:"args,omitempty"`
-}
-
-type hostResponse struct {
-	Abi     int             `json:"abi"`
-	Status  string          `json:"status"`
-	Code    string          `json:"code,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Message string          `json:"message,omitempty"`
 }
 
 type output struct {
@@ -50,12 +38,12 @@ func run() int32 {
 
 	switch in.Mode {
 	case "completed":
-		response, err := dispatch(syscall{Name: "host.echo", Args: json.RawMessage(`{"value":"ok"}`)})
+		response, err := dispatch(wire.Syscall{Name: "host.echo", Args: []byte(`{"value":"ok"}`)})
 		if err != nil {
 			pdk.SetError(err)
 			return 1
 		}
-		if response.Status != "result" {
+		if response.Status != wire.StatusResult {
 			pdk.SetErrorString("expected result status")
 			return 1
 		}
@@ -66,12 +54,12 @@ func run() int32 {
 		return 0
 
 	case "yielded":
-		response, err := dispatch(syscall{Name: "host.yield"})
+		response, err := dispatch(wire.Syscall{Name: "host.yield"})
 		if err != nil {
 			pdk.SetError(err)
 			return 1
 		}
-		if response.Status != "yield" {
+		if response.Status != wire.StatusYield {
 			pdk.SetErrorString("expected yield status")
 			return 1
 		}
@@ -140,23 +128,18 @@ func run() int32 {
 	}
 }
 
-func dispatch(sc syscall) (hostResponse, error) {
+func dispatch(sc wire.Syscall) (wire.Response, error) {
 	sc.Abi = abiVersion
-	data, err := json.Marshal(sc)
-	if err != nil {
-		return hostResponse{}, fmt.Errorf("encode syscall: %w", err)
-	}
-
-	request := pdk.AllocateBytes(data)
+	request := pdk.AllocateBytes(wire.EncodeSyscall(sc))
 	defer request.Free()
 
 	responseOffset := hostSyscall(request.Offset())
-	var response hostResponse
-	if err := pdk.JSONFrom(responseOffset, &response); err != nil {
-		return hostResponse{}, fmt.Errorf("decode host response: %w", err)
+	response, err := wire.DecodeResponse(pdk.ParamBytes(responseOffset))
+	if err != nil {
+		return wire.Response{}, fmt.Errorf("decode host response: %w", err)
 	}
-	if response.Status == "failed" {
-		return hostResponse{}, fmt.Errorf("host failed (%s): %s", response.Code, response.Message)
+	if response.Status == wire.StatusFailed {
+		return wire.Response{}, fmt.Errorf("host failed (%s): %s", response.Code, response.Message)
 	}
 	return response, nil
 }

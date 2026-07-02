@@ -6,8 +6,10 @@ import (
 )
 
 // ABIVersion is the syscall wire version this kernel speaks. Guests declare
-// it on every Syscall; the host rejects mismatches with ErrnoBadABI.
-const ABIVersion = 2
+// it on every Syscall; the host rejects mismatches with ErrnoBadABI. Since
+// v3 the wire encoding is the protobuf envelope in package sys/wire; the
+// JSON tags on these types serve journals and audit rendering, not the wire.
+const ABIVersion = 3
 
 // Reserved syscall names. Savepoint brackets are journaled as side-effect-free
 // markers by the host: on a failed-run resume, the journal is forked just past

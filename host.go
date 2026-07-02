@@ -2,34 +2,23 @@ package capcompute
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	extism "github.com/extism/go-sdk"
 
 	"github.com/aurora-capcompute/capcompute/sys"
+	"github.com/aurora-capcompute/capcompute/sys/wire"
 )
 
 type pidContextKey struct{}
 
-type hostResponse struct {
-	Abi     int               `json:"abi"`
-	Status  sys.SyscallStatus `json:"status"`
-	Code    sys.Errno         `json:"code,omitempty"`
-	Result  json.RawMessage   `json:"result,omitempty"`
-	Message string            `json:"message,omitempty"`
-	// Labels is the result's provenance (sorted source classes). Guests see
-	// where their data came from — a brain can treat untrusted content as
-	// untrusted instead of trusting whatever it reads.
-	Labels []string `json:"labels,omitempty"`
-}
-
-func failResponse(errno sys.Errno, message string) hostResponse {
-	return hostResponse{Abi: sys.ABIVersion, Status: sys.StatusFailed, Code: errno, Message: message}
+func failResponse(errno sys.Errno, message string) wire.Response {
+	return wire.Response{Abi: sys.ABIVersion, Status: wire.StatusFailed, Code: string(errno), Message: message}
 }
 
 // hostFunction registers the single syscall entry point. Guests import
-// `extism:host/compute syscall`; every host capability flows through it.
+// `extism:host/compute syscall`; every host capability flows through it,
+// encoded as the ABI v3 protobuf envelope (sys/wire).
 func hostFunction[ID comparable, K PID[ID]](table ProcessTable[ID, K]) extism.HostFunction {
 	host := extism.NewHostFunctionWithStack(
 		"syscall",
@@ -62,37 +51,30 @@ func dispatchSyscall[ID comparable, K PID[ID]](
 		return returnToGuest(plugin, failResponse(sys.ErrnoInvalidArgs, fmt.Errorf("read raw syscall: %w", err).Error()))
 	}
 
-	var syscall sys.Syscall
-	if err := json.Unmarshal(rawSyscall, &syscall); err != nil {
+	// A JSON envelope is the pre-v3 wire — classify it as the version
+	// mismatch it is, not as garbage.
+	if len(rawSyscall) > 0 && rawSyscall[0] == '{' {
+		return returnToGuest(plugin, failResponse(sys.ErrnoBadABI,
+			fmt.Sprintf("JSON envelope is pre-v3; host speaks %d (protobuf)", sys.ABIVersion)))
+	}
+	decoded, err := wire.DecodeSyscall(rawSyscall)
+	if err != nil {
 		return returnToGuest(plugin, failResponse(sys.ErrnoInvalidArgs, fmt.Errorf("decode syscall: %w", err).Error()))
 	}
-	if syscall.Abi != sys.ABIVersion {
+	if decoded.Abi != sys.ABIVersion {
 		return returnToGuest(plugin, failResponse(sys.ErrnoBadABI,
-			fmt.Sprintf("syscall abi %d, host speaks %d", syscall.Abi, sys.ABIVersion)))
+			fmt.Sprintf("syscall abi %d, host speaks %d", decoded.Abi, sys.ABIVersion)))
 	}
 
-	result, err := process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
+	result, err := process.dispatcher.Dispatch(ctx, process.Cred, wire.ToSyscall(decoded), sys.Authorization{})
 	if err != nil {
 		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, err.Error()))
 	}
-
-	return returnToGuest(plugin, hostResponse{
-		Abi:     sys.ABIVersion,
-		Status:  result.Status(),
-		Code:    result.Errno(),
-		Result:  result.Result(),
-		Message: result.Message(),
-		Labels:  result.Labels(),
-	})
+	return returnToGuest(plugin, wire.FromResult(result))
 }
 
-func returnToGuest(plugin *extism.CurrentPlugin, response hostResponse) uint64 {
-	data, err := json.Marshal(response)
-	if err != nil {
-		panic(fmt.Errorf("encode host response: %w", err))
-	}
-
-	offset, err := plugin.WriteBytes(data)
+func returnToGuest(plugin *extism.CurrentPlugin, response wire.Response) uint64 {
+	offset, err := plugin.WriteBytes(wire.EncodeResponse(response))
 	if err != nil {
 		panic(fmt.Errorf("write host response: %w", err))
 	}
