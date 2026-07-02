@@ -52,7 +52,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult`; lists `Capabilities()` |
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
-| `journaled.Record{Syscall,Result}` tape | **Journal** (WAL) | append-only log = durability + audit (one structure, two jobs) |
+| `journaled.Record` (intent/completion, hash-chained) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
 > (which would shadow Go's stdlib).
@@ -114,9 +114,21 @@ governance and durability claims *provable* rather than aspirational.
    *Enforced in code:* the WASI clock and RNG a guest can reach are pinned to
    deterministic sources that restart identically per instance (`ambient.go`),
    so a crash-replay observes the original sequence.
-3. **Journal-before-observe.** Every side-effecting syscall's outcome is committed
-   to the journal before it is observable, so replay is exact. (`yield` is never
-   committed — it is a re-triable, blocking syscall.)
+3. **Journal write-ahead.** Two laws, one per direction of the boundary:
+   **journal-before-execute** — an *intent* record is appended before a
+   syscall's driver runs, so nothing changes the world without a trace; a
+   crash between execute and commit leaves a detectable *open intent*, and
+   the intent identity `(run, position, call-hash)` is the idempotency key
+   handed to the driver, stable across retries. **Journal-before-observe** —
+   the *completion* record is appended before the result becomes observable
+   to the guest, so replay is exact. (`yield` is never committed — it is a
+   re-triable, blocking syscall whose intent stays open while the external
+   task is pending.)
+   *Enforced in code:* the intent/completion tape
+   (`sys/replay/tape/journaled`); an open intent met on replay is retried
+   under its original idempotency key or surfaced as `IndeterminateError`,
+   per `OpenIntentPolicy`; records are hash-chained (`prev_hash`,
+   `journaled.Verify`) so the journal is tamper-evident.
 4. **Un-bypassable reference monitor.** An approval-required capability cannot
    execute without a resolved `Authorization`, and the monitor validates
    *every* access — **complete mediation**: a syscall is checked against the

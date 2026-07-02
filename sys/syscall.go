@@ -105,3 +105,35 @@ func (r SyscallResult) Copy() SyscallResult {
 	r.result = append(json.RawMessage(nil), r.result...)
 	return r
 }
+
+// syscallResultJSON is the durable/wire rendering of a SyscallResult — the
+// same field set the host returns to guests.
+type syscallResultJSON struct {
+	Status  SyscallStatus   `json:"status"`
+	Code    Errno           `json:"code,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Message string          `json:"message,omitempty"`
+}
+
+func (r SyscallResult) MarshalJSON() ([]byte, error) {
+	return json.Marshal(syscallResultJSON{
+		Status:  r.status,
+		Code:    r.errno,
+		Result:  r.result,
+		Message: r.message,
+	})
+}
+
+func (r *SyscallResult) UnmarshalJSON(data []byte) error {
+	var decoded syscallResultJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = SyscallResult{
+		status:  decoded.Status,
+		errno:   decoded.Code,
+		result:  decoded.Result,
+		message: decoded.Message,
+	}
+	return nil
+}
