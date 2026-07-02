@@ -154,7 +154,7 @@ primitive). Staged so value lands before the deepest part.
   interpreter.
   DoD: a tainted-arg call to a protected capability is refused; policy is
   per-capability metadata.
-- **M4.3 Declassification as a governed operation** — staged: `FlowMonitor.Declassify` (the mechanism) is `DONE`; the approval-composed syscall surface for it is `NEXT`
+- **M4.3 Declassification as a governed operation** — `DONE` (`sys.declassify`: reason required, approval mandatory, crossing journaled and replayed without re-asking; `Declassifier` below replay + `FlowMonitor` removal above)
   Moving a value across a label boundary is an explicit operation that composes
   with `require_approval` (a human authorizes the crossing). DIFC declassify,
   gated by the approval flow you already have.
@@ -199,7 +199,7 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   DoD: sync child completes and commits to parent journal; replay does not
   re-spawn; capability escalation refused; child-yield propagates to parent and
   resumes correctly.
-- **M5.3 IPC + supervision** — `SPEC` then `BLOCKED(M5.2)` (CHALLENGE I)
+- **M5.3 IPC + supervision** — spec written (`ARCHITECTURE.md`, *IPC and supervision*); `BLOCKED(a real concurrent workload)` (CHALLENGE I)
   Capability-passing message send/receive, each journaled; deterministic
   interleaving via a per-receiver ordered input log; supervision as process
   metadata (OTP strategies: one-for-one/one-for-all/rest-for-one, max-restart-
@@ -231,7 +231,7 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
   DoD: two threads of one tenant share state via get/put; a replay re-reads the
   journaled value; an agent attenuated to a subtree cannot read outside it;
   cross-tenant access denied.
-- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `NEXT` (M4.1 and M6.1 both landed; store the value's labels on put, restamp on get)
+- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `DONE` (`memory.put` stores the writer's taint via `sys.Taint`, `memory.get` restamps it; cross-thread poison test drives the full stack)
   `memory.put` stores the value's labels (M4 provenance); `memory.get` surfaces
   them, so a value written from an `untrusted_web`-tainted run resurfaces in a
   later thread *as untrusted*, not as laundered truth. This is the differentiator
@@ -289,11 +289,14 @@ as-inbound-drivers (ROADMAP #8), Manifest CRD OS-convention naming. Tracked in
 ---
 
 ## Recommended starting point
-The original four cheap items, M3 (intent records + compensation + DST), M4.1/2
-(provenance + flow policy), M5.2 (spawn), M6.1 (tenant memory), and the
-hash-chain/OTel cross-cutters are all `DONE`. The live frontier, in value
-order: **M6.2** (provenance-labelled memory — the memory-poisoning defense,
-now fully unblocked), **M4.3**'s declassification syscall surface, **ABI v3**
-once a TinyGo/prost protobuf round-trip is verified, and **M5.1/M5.3** when a
-scheduler consumer or async multiprocess need appears. The k8s-agent crossover
-stays blocked on the out-of-scope module migrations.
+Everything schedulable without a new external dependency is `DONE`: M1, M2.1,
+all of M3, all of M4 (labels, flow policy, governed declassification), M5.0,
+M5.2, M6.1, M6.2, hash-chain, and the OTel exporter. What remains, and what
+each waits for: **ABI v3** waits on a verified TinyGo/prost protobuf
+round-trip (toolchain, not design); **M5.1 scheduler seam + M2.2 aggregate
+quotas** wait on a scheduler consumer in the runtime; **M5.3 IPC/supervision**
+(spec'd in ARCHITECTURE.md) and **M5.4** wait on a real concurrent workload;
+**M6.3 CAS** waits on real concurrent writers; **journal lifecycle** waits on
+real journal volume; the **k8s-agent crossover** waits on the out-of-scope
+module migrations. The next code in this repo should be pulled by one of
+those consumers, not pushed ahead of them.

@@ -244,6 +244,33 @@ stopped child returns a host error so the spawn intent stays open —
 outcome unknown, resolved on replay. Sync-first needs no scheduler: the child
 borrows the parent's quantum by construction.
 
+## IPC and supervision (spec — build when concurrency forces it)
+
+Sync-first `spawn` covers composition today. When agents must run
+*concurrently* and talk, these are the decided shapes (PLAN M5.3); nothing
+here is built, deliberately — every piece costs determinism bookkeeping that
+is pure waste until a real concurrent workload exists.
+
+- **Messages are journaled twice, once per side.** A send is an *effect* in
+  the sender's journal (intent/completion like any syscall); a receive is an
+  *input event* in the receiver's journal. The receiver replays its input log
+  **positionally** — delivery order is whatever the journal recorded, never
+  wall-clock — which is what makes concurrent interleaving deterministic
+  (actor model + event sourcing). This per-receiver ordered input log is the
+  determinism cost that keeps async spawn deferred.
+- **Capability passing rides messages.** A message may carry capability names
+  ⊆ the sender's grant set, checked by `sys.Attenuate` at send exactly like
+  spawn; the receive event journals the authority transfer, so the tenant's
+  delegation graph stays auditable end to end.
+- **Supervision is process metadata, not code.** OTP's vocabulary: strategy
+  (`one-for-one` / `one-for-all` / `rest-for-one`), max-restart intensity,
+  and an orphan policy on parent stop (cascade-kill vs adopt). A restart is a
+  *new run* re-created from the `ProcessSpec` — journaled, so even crash-loop
+  history is audit trail.
+- **Unforgeable capability references (M5.4)** stay deferred until guest-to-
+  guest delegation via IPC exists; until then the model is authorized-by-cred,
+  documented honestly (CHALLENGE J).
+
 ## Persistence and replay
 
 A process's *own* state has no filesystem: a process is durable because the

@@ -19,7 +19,7 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 8 | Sources-as-inbound-drivers refactor (aurora-k8s-agent) | M | M | deferred |
 | 9 | Intent/completion journal records (journal-before-execute) | H | M | **done** (two-record tape, idempotency keys) |
 | 10 | Compensation metadata + saga unwinding | H | M | **done** (`Capability.Compensation`, `Unwind`) |
-| 11 | Information-flow labels + provenance (CaMeL-style) | H | L | **done** — labels+flow policy (`provenance.go`); declassify syscall surface open |
+| 11 | Information-flow labels + provenance (CaMeL-style) | H | L | **done** — labels, flow policy, and `sys.declassify` (`provenance.go`) |
 | 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | **done** for per-process caps (`MaxMemoryPages`, `ResumeTimeout`); aggregate quotas ride the scheduler seam |
 | 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | H | M | **done** (`sim/`, full crash matrix) |
