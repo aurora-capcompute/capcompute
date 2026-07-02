@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/extism/go-pdk v1.1.3
 	github.com/extism/go-sdk v1.7.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/tetratelabs/wazero v1.12.0
 )
 
@@ -18,5 +19,6 @@ require (
 	github.com/tetratelabs/wabin v0.0.0-20230304001439-f6f874872834 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 )

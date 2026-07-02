@@ -118,7 +118,14 @@ governance and durability claims *provable* rather than aspirational.
    to the journal before it is observable, so replay is exact. (`yield` is never
    committed — it is a re-triable, blocking syscall.)
 4. **Un-bypassable reference monitor.** An approval-required capability cannot
-   execute without a resolved `Authorization`.
+   execute without a resolved `Authorization`, and the monitor validates
+   *every* access — **complete mediation**: a syscall is checked against the
+   cred's grant set (ungranted name → `denied`) and its args against the
+   capability's declared `InputSchema` (malformed → `invalid_args`) before any
+   driver sees it.
+   *Enforced in code:* the `Validator` decorator (`validate.go`) placed at the
+   front of the dispatcher chain; reserved markers (`sys.begin`/`sys.commit`)
+   are exempt because they are kernel control syscalls, not capabilities.
 5. **Minimal TCB.** The kernel owns lifecycle, syscall dispatch, and enforcement —
    nothing else. Guard the boundary; helpers do not belong in the kernel.
 
