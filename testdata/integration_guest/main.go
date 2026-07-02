@@ -89,6 +89,18 @@ func run() int32 {
 		for {
 		}
 
+	// hog allocates far past any sane memory cap; under MaxMemoryPages the
+	// growth traps and the resume must report failure, never a host OOM.
+	case "hog":
+		var chunks [][]byte
+		for i := 0; i < 4096; i++ {
+			chunk := make([]byte, 1<<20)
+			chunk[0] = byte(i)
+			chunks = append(chunks, chunk)
+		}
+		pdk.SetErrorString(fmt.Sprintf("hog survived %d MiB", len(chunks)))
+		return 1
+
 	// ambient reads the WASI clock and RNG — the sources the kernel pins.
 	// The host test runs this mode on two fresh processes and requires
 	// identical observations (kernel law #2: determinism).

@@ -371,3 +371,99 @@ func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
 		t.Fatalf("ambient http produced status %s (output %s); want failed", result.Status, result.Output)
 	}
 }
+
+func TestTinyGoGuestResourceLimits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping TinyGo integration test in short mode")
+	}
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		t.Skip("tinygo not found")
+	}
+
+	ctx := context.Background()
+	wasmPath := buildTinyGoIntegrationGuest(t)
+
+	newKernel := func(t *testing.T, table *memory.ProcessTable[string, integrationPID], config capcompute.Config[string, integrationPID]) *capcompute.Kernel[string, integrationPID] {
+		t.Helper()
+		config.Image = extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}}
+		config.PluginConfig = extism.PluginConfig{EnableWasi: true}
+		config.ProcessTable = table
+		kernel, err := capcompute.NewKernel[string, integrationPID](ctx, config)
+		if err != nil {
+			t.Fatalf("new kernel: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := kernel.Shutdown(context.Background()); err != nil {
+				t.Errorf("shutdown kernel: %v", err)
+			}
+		})
+		return kernel
+	}
+
+	resume := func(t *testing.T, kernel *capcompute.Kernel[string, integrationPID], table *memory.ProcessTable[string, integrationPID], mode string) capcompute.ResumeResult[integrationPID] {
+		t.Helper()
+		pid := integrationPID{id: "run-" + mode}
+		input, err := json.Marshal(struct {
+			Mode string `json:"mode"`
+		}{Mode: mode})
+		if err != nil {
+			t.Fatalf("encode input: %v", err)
+		}
+		process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+			Input:      input,
+			Entrypoint: "run",
+			Cred:       pid,
+			Dispatcher: integrationDispatcher{},
+		})
+		if err != nil {
+			t.Fatalf("create process: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := process.Close(context.Background()); err != nil && !errors.Is(err, capcompute.ErrProcessActive) {
+				t.Errorf("close process: %v", err)
+			}
+		})
+		if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
+			t.Fatalf("save process: %v", err)
+		}
+		handle, err := kernel.Resume(ctx, process)
+		if err != nil {
+			t.Fatalf("resume: %v", err)
+		}
+		select {
+		case result := <-handle.Results():
+			return result
+		case <-time.After(30 * time.Second):
+			t.Fatal("resume did not return")
+			panic("unreachable")
+		}
+	}
+
+	t.Run("memory cap traps the hog", func(t *testing.T) {
+		table := memory.NewProcessTable[string, integrationPID]()
+		kernel := newKernel(t, table, capcompute.Config[string, integrationPID]{
+			MaxMemoryPages: 256, // 16 MiB
+		})
+		result := resume(t, kernel, table, "hog")
+		if result.Status != capcompute.ResumeFailed {
+			t.Fatalf("status = %s, want %s; err = %v", result.Status, capcompute.ResumeFailed, result.Err)
+		}
+		if result.Err == nil {
+			t.Fatal("failed resume returned nil error")
+		}
+	})
+
+	t.Run("deadline stops the infinite loop", func(t *testing.T) {
+		table := memory.NewProcessTable[string, integrationPID]()
+		kernel := newKernel(t, table, capcompute.Config[string, integrationPID]{
+			ResumeTimeout: time.Second,
+		})
+		result := resume(t, kernel, table, "infinite")
+		if result.Status != capcompute.ResumeStopped {
+			t.Fatalf("status = %s, want %s; err = %v", result.Status, capcompute.ResumeStopped, result.Err)
+		}
+		if !errors.Is(result.Err, context.DeadlineExceeded) {
+			t.Fatalf("error = %v, want context deadline exceeded", result.Err)
+		}
+	})
+}

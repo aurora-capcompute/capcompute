@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"time"
 
 	extism "github.com/extism/go-sdk"
 	"github.com/tetratelabs/wazero"
@@ -39,12 +40,23 @@ type Config[ID comparable, K PID[ID]] struct {
 	Image        extism.Manifest
 	PluginConfig extism.PluginConfig
 	ProcessTable ProcessTable[ID, K]
+
+	// MaxMemoryPages caps each process's linear memory in 64KiB wasm pages
+	// (0 = runtime default). A guest allocating past the cap traps and the
+	// resume reports ResumeFailed.
+	MaxMemoryPages uint32
+
+	// ResumeTimeout bounds the wall-clock time of one Resume quantum
+	// (0 = unbounded). A guest still running at the deadline is stopped and
+	// the resume reports ResumeStopped with context.DeadlineExceeded.
+	ResumeTimeout time.Duration
 }
 
 // Kernel owns one compiled program image and spawns processes from it.
 type Kernel[ID comparable, K PID[ID]] struct {
-	compiled     *extism.CompiledPlugin
-	processTable ProcessTable[ID, K]
+	compiled      *extism.CompiledPlugin
+	processTable  ProcessTable[ID, K]
+	resumeTimeout time.Duration
 }
 
 // Process owns the reusable Extism plugin instance for one PID.
@@ -163,14 +175,19 @@ func NewKernel[ID comparable, K PID[ID]](ctx context.Context, config Config[ID, 
 	}
 
 	kernel := &Kernel[ID, K]{
-		processTable: config.ProcessTable,
+		processTable:  config.ProcessTable,
+		resumeTimeout: config.ResumeTimeout,
 	}
 
 	runtimeConfig := config.PluginConfig.RuntimeConfig
 	if runtimeConfig == nil {
 		runtimeConfig = wazero.NewRuntimeConfig()
 	}
-	config.PluginConfig.RuntimeConfig = runtimeConfig.WithCloseOnContextDone(true)
+	runtimeConfig = runtimeConfig.WithCloseOnContextDone(true)
+	if config.MaxMemoryPages > 0 {
+		runtimeConfig = runtimeConfig.WithMemoryLimitPages(config.MaxMemoryPages)
+	}
+	config.PluginConfig.RuntimeConfig = runtimeConfig
 
 	compiled, err := extism.NewCompiledPlugin(ctx, config.Image, config.PluginConfig, []extism.HostFunction{
 		hostFunction(kernel.processTable),
@@ -280,6 +297,9 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 
 	pid := process.Cred.PID()
 	callCtx, cancel := context.WithCancel(ctx)
+	if k.resumeTimeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, k.resumeTimeout)
+	}
 	handle := &ResumeHandle[K]{
 		results: make(chan ResumeResult[K], 1),
 		cancel:  cancel,
@@ -292,7 +312,7 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
 		handle.mu.Lock()
-		stopped := handle.stopRequested || ctx.Err() != nil
+		stopped := handle.stopRequested || callCtx.Err() != nil
 		handle.finished = true
 		handle.mu.Unlock()
 
