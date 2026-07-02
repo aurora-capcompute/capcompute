@@ -28,6 +28,13 @@ const (
 	// (the approved crossing is journaled); the FlowMonitor above applies
 	// the taint removal when the result passes through, fresh or replayed.
 	SyscallDeclassify = "sys.declassify"
+	// SyscallSend and SyscallRecv are message-passing IPC, served by the
+	// kernel's Messenger decorator. A send is an effect in the sender's
+	// journal; a receive is an input event in the receiver's journal, so
+	// delivery order replays positionally — never by wall clock. An empty
+	// mailbox yields.
+	SyscallSend = "sys.send"
+	SyscallRecv = "sys.recv"
 )
 
 // Syscall is the guest-to-host request crossing the syscall boundary.

@@ -22,6 +22,7 @@ import (
 var (
 	ErrClosed           = errors.New("sched: scheduler is closed")
 	ErrAlreadyScheduled = errors.New("sched: process is already scheduled")
+	ErrStopped          = errors.New("sched: stopped before running")
 )
 
 // Priority is a strict band: everything runnable in a higher band goes first.
@@ -81,6 +82,8 @@ type entry[ID comparable, K capcompute.PID[ID]] struct {
 	owner    string
 	priority Priority
 	result   chan capcompute.ResumeResult[K]
+	// cancel aborts the running quantum; nil while queued.
+	cancel context.CancelFunc
 }
 
 type resident[K any] struct {
@@ -188,6 +191,53 @@ func (s *Scheduler[ID, K]) Close() {
 	}
 }
 
+// Stop aborts pid's outstanding submission: a queued quantum is dequeued and
+// delivered a stopped result; a running one has its context cancelled — the
+// kernel kills the guest and the stopped result flows out the normal way.
+// Returns false when pid has no outstanding submission.
+func (s *Scheduler[ID, K]) Stop(pid ID) bool {
+	s.mu.Lock()
+	scheduled, ok := s.entries[pid]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+	if scheduled.cancel != nil {
+		cancel := scheduled.cancel
+		s.mu.Unlock()
+		cancel()
+		return true
+	}
+	s.dequeue(scheduled)
+	delete(s.entries, pid)
+	s.mu.Unlock()
+	scheduled.result <- capcompute.ResumeResult[K]{Status: capcompute.ResumeStopped, Err: ErrStopped}
+	return true
+}
+
+// dequeue removes a queued entry from its band. Caller holds the lock.
+func (s *Scheduler[ID, K]) dequeue(queued *entry[ID, K]) {
+	band := s.queues[queued.priority]
+	queue := band.queues[queued.owner]
+	kept := queue[:0]
+	for _, waiting := range queue {
+		if waiting != queued {
+			kept = append(kept, waiting)
+		}
+	}
+	if len(kept) == 0 {
+		delete(band.queues, queued.owner)
+		for element := band.order.Front(); element != nil; element = element.Next() {
+			if element.Value.(string) == queued.owner {
+				band.order.Remove(element)
+				break
+			}
+		}
+	} else {
+		band.queues[queued.owner] = kept
+	}
+}
+
 // Resident reports how many processes are currently activated.
 func (s *Scheduler[ID, K]) Resident() int {
 	s.mu.Lock()
@@ -213,8 +263,10 @@ func (s *Scheduler[ID, K]) schedule(ctx context.Context) {
 		}
 		s.running++
 		s.byOwner[next.owner]++
+		quantumCtx, cancel := context.WithCancel(ctx)
+		next.cancel = cancel
 		s.quanta.Add(1)
-		go s.runQuantum(ctx, next)
+		go s.runQuantum(quantumCtx, next)
 	}
 }
 
@@ -256,6 +308,7 @@ func (s *Scheduler[ID, K]) atQuota(owner string) bool {
 // deliver the result, retire or evict, then let the next quantum start.
 func (s *Scheduler[ID, K]) runQuantum(ctx context.Context, running *entry[ID, K]) {
 	defer s.quanta.Done()
+	defer running.cancel()
 
 	process, err := s.checkout(ctx, running)
 	if err != nil {

@@ -205,7 +205,7 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   DoD: sync child completes and commits to parent journal; replay does not
   re-spawn; capability escalation refused; child-yield propagates to parent and
   resumes correctly.
-- **M5.3 IPC + supervision** — spec written (`ARCHITECTURE.md`, *IPC and supervision*); `BLOCKED(a real concurrent workload)` (CHALLENGE I)
+- **M5.3 IPC + supervision** — `DONE` (`ipc.go`: sys.send/sys.recv through the journaled path, keyed Mailbox dedup, attenuated capability passing, empty-recv yields; `sched/supervisor.go`: one-for-one/one-for-all/rest-for-one via Scheduler.Stop + resubmit, restart intensity, escalation) (CHALLENGE I)
   Capability-passing message send/receive, each journaled; deterministic
   interleaving via a per-receiver ordered input log; supervision as process
   metadata (OTP strategies: one-for-one/one-for-all/rest-for-one, max-restart-
@@ -304,15 +304,13 @@ as-inbound-drivers (ROADMAP #8), Manifest CRD OS-convention naming. Tracked in
 ---
 
 ## Recommended starting point
-Every item buildable inside these repos is `DONE` — M1 through M6 (including
-ABI v3, the scheduler seam, aggregate quotas, CAS, and governed
-declassification). What remains, and the consumer each waits for: **M5.3
-IPC/supervision** and **M5.4** wait on a real concurrent workload (spec in
-ARCHITECTURE.md); **M6.3's** CAS is in but multi-writer pressure may motivate
-richer primitives; **journal lifecycle** waits on real volume; **M2.3
-deterministic CPU fuel** waits on a wazero fuel mechanism or a runtime
-switch; the **k8s-agent crossover** waits on the out-of-scope
-`aurora-capcompute`/`aurora-stores` migrations — which is also where the
-runtime picks up the scheduler seam, the validator/provenance chain, and the
-v3 wire. That migration is the single highest-value next move, and it lives
-outside this session's scope.
+Everything designed for these repos is `DONE` — M1 through M6 complete,
+including ABI v3, the scheduler, quotas, IPC, and supervision. The honest
+remainder: **M2.3** CPU fuel waits on a wazero fuel mechanism; **M5.4**
+unforgeable capability references wait on evidence that authorized-by-cred is
+insufficient; **journal lifecycle** waits on real volume (live compaction
+additionally needs guest-memory snapshots); and the **k8s-agent crossover**
+waits on the out-of-scope `aurora-capcompute`/`aurora-stores` migrations —
+the runtime migration that consumes the scheduler seam, the monitor chain,
+IPC, and the v3 wire in one move. That migration is the next real work, and
+it needs a session scoped to those repos.

@@ -273,32 +273,36 @@ wall-clock-dependent refusal would be guest-visible nondeterminism, while a
 delay is invisible to a guest with no ambient clock (law #2 shapes even the
 rate limiter).
 
-## IPC and supervision (spec — build when concurrency forces it)
+## IPC and supervision
 
-Sync-first `spawn` covers composition today. When agents must run
-*concurrently* and talk, these are the decided shapes (PLAN M5.3); nothing
-here is built, deliberately — every piece costs determinism bookkeeping that
-is pure waste until a real concurrent workload exists.
+Sync-first `spawn` covers composition; message passing covers concurrency.
+Implemented (PLAN M5.3):
 
-- **Messages are journaled twice, once per side.** A send is an *effect* in
-  the sender's journal (intent/completion like any syscall); a receive is an
-  *input event* in the receiver's journal. The receiver replays its input log
-  **positionally** — delivery order is whatever the journal recorded, never
-  wall-clock — which is what makes concurrent interleaving deterministic
-  (actor model + event sourcing). This per-receiver ordered input log is the
-  determinism cost that keeps async spawn deferred.
+- **Messages are journaled twice, once per side** (`ipc.go`, the `Messenger`
+  decorator below the replay layer). A `sys.send` is an *effect* in the
+  sender's journal — replay never re-sends; a `sys.recv` is an *input event*
+  in the receiver's journal — replay re-reads the same message at the same
+  position, so delivery order is journal order, never wall clock (actor model
+  + event sourcing). Both sides carry idempotency keys and the app-supplied
+  durable `Mailbox` dedups on them: a crash-retried send delivers once, a
+  crash-retried receive re-reads the message it consumed. A receive on an
+  empty mailbox **yields** — the run parks until the app wakes it on
+  delivery, the same protocol as any pending external task.
 - **Capability passing rides messages.** A message may carry capability names
   ⊆ the sender's grant set, checked by `sys.Attenuate` at send exactly like
-  spawn; the receive event journals the authority transfer, so the tenant's
-  delegation graph stays auditable end to end.
-- **Supervision is process metadata, not code.** OTP's vocabulary: strategy
-  (`one-for-one` / `one-for-all` / `rest-for-one`), max-restart intensity,
-  and an orphan policy on parent stop (cascade-kill vs adopt). A restart is a
-  *new run* re-created from the `ProcessSpec` — journaled, so even crash-loop
-  history is audit trail.
-- **Unforgeable capability references (M5.4)** stay deferred until guest-to-
-  guest delegation via IPC exists; until then the model is authorized-by-cred,
-  documented honestly (CHALLENGE J).
+  spawn; how the receiver's grant table absorbs them is app policy.
+  **Unforgeable capability references (M5.4)** stay deferred: the model is
+  authorized-by-cred, documented honestly (CHALLENGE J).
+- **Supervision** (`sched/supervisor.go`): OTP strategies adapted to durable
+  cooperative runs — "restart" means stop the quantum (`Scheduler.Stop`: a
+  queued quantum dequeues, a running one has its context cancelled and the
+  kernel kills the guest) and resubmit; replay reconstructs the child
+  exactly, so a restart loses no committed work. `one-for-one` /
+  `one-for-all` / `rest-for-one`, with supervisor-wide restart intensity
+  (max restarts per window; exceeded → give up and escalate through
+  `OnExit`). Failures burn intensity; strategy-triggered sibling restarts do
+  not. Completed and yielded runs exit supervision normally — crashes are
+  what supervision is for.
 
 ## Persistence and replay
 

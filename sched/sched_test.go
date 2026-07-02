@@ -46,10 +46,17 @@ func (h *harness) config() sched.Config[string, schedPID] {
 			h.mu.Unlock()
 			return &capcompute.Process[schedPID]{Cred: schedPID{id: pid}}, nil
 		},
-		Resume: func(_ context.Context, process *capcompute.Process[schedPID]) (<-chan capcompute.ResumeResult[schedPID], error) {
+		Resume: func(ctx context.Context, process *capcompute.Process[schedPID]) (<-chan capcompute.ResumeResult[schedPID], error) {
 			started := quantum{pid: process.Cred.PID(), done: make(chan capcompute.ResumeResult[schedPID], 1)}
 			results := make(chan capcompute.ResumeResult[schedPID], 1)
-			go func() { results <- <-started.done }()
+			go func() {
+				select {
+				case result := <-started.done:
+					results <- result
+				case <-ctx.Done():
+					results <- capcompute.ResumeResult[schedPID]{Status: capcompute.ResumeStopped, Err: ctx.Err()}
+				}
+			}()
 			h.running <- started
 			return results, nil
 		},
@@ -332,5 +339,58 @@ func TestCloseStopsQueuedWork(t *testing.T) {
 	// The blocker yielded warm; Close deactivated it on the way out.
 	if got := h.deactivated(); len(got) != 1 || got[0] != "blocker" {
 		t.Fatalf("deactivations = %v, want [blocker]", got)
+	}
+}
+
+func TestStopDequeuesQueuedWork(t *testing.T) {
+	h := newHarness()
+	scheduler, err := sched.New(h.config())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer scheduler.Close()
+
+	blockerResults, _ := scheduler.Submit(context.Background(), "blocker", "acme", sched.Normal)
+	blocker := h.next(t)
+	queuedResults, _ := scheduler.Submit(context.Background(), "queued", "acme", sched.Normal)
+
+	if !scheduler.Stop("queued") {
+		t.Fatal("Stop(queued) = false")
+	}
+	if result := await(t, queuedResults); result.Status != capcompute.ResumeStopped || !errors.Is(result.Err, sched.ErrStopped) {
+		t.Fatalf("stopped result = %+v", result)
+	}
+	if scheduler.Stop("unknown") {
+		t.Fatal("Stop(unknown) = true")
+	}
+
+	blocker.done <- completed()
+	await(t, blockerResults)
+	if h.activationsOf("queued") != 0 {
+		t.Fatal("dequeued work was activated")
+	}
+	// The stopped PID is submittable again.
+	if _, err := scheduler.Submit(context.Background(), "queued", "acme", sched.Normal); err != nil {
+		t.Fatalf("resubmit after stop: %v", err)
+	}
+	h.next(t).done <- completed()
+}
+
+func TestStopCancelsRunningQuantum(t *testing.T) {
+	h := newHarness()
+	scheduler, err := sched.New(h.config())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer scheduler.Close()
+
+	results, _ := scheduler.Submit(context.Background(), "p1", "acme", sched.Normal)
+	h.next(t) // running, never finished by the test
+	if !scheduler.Stop("p1") {
+		t.Fatal("Stop(p1) = false")
+	}
+	result := await(t, results)
+	if result.Status != capcompute.ResumeStopped || !errors.Is(result.Err, context.Canceled) {
+		t.Fatalf("cancelled result = %+v", result)
 	}
 }
