@@ -145,9 +145,21 @@ governance and durability claims *provable* rather than aspirational.
    cred's grant set (ungranted name → `denied`) and its args against the
    capability's declared `InputSchema` (malformed → `invalid_args`) before any
    driver sees it.
-   *Enforced in code:* the `Validator` decorator (`validate.go`) placed at the
-   front of the dispatcher chain; reserved markers (`sys.begin`/`sys.commit`)
-   are exempt because they are kernel control syscalls, not capabilities.
+   The monitor also enforces **information flow** (the CaMeL architecture as
+   a kernel primitive): capabilities declare the source classes their results
+   carry (`Labels`, e.g. `untrusted_web`) and the classes that may not flow
+   into their args (`Forbid`); because the guest is opaque, flow is judged
+   conservatively — every label a run observes taints everything it later
+   emits. Declassification is an explicit, app-governed operation intended to
+   compose with human approval.
+   *Enforced in code:* the `Validator` decorator (`validate.go`) at the front
+   of the dispatcher chain, plus the provenance pair (`provenance.go`) —
+   `Labeler` below the replay layer (so labels are journaled with each
+   completion) and `FlowMonitor` above it (so a crash-restarted host rebuilds
+   taint exactly from replayed results). Chain order: `Validator` →
+   `FlowMonitor` → replay → `Labeler` → drivers. Reserved markers
+   (`sys.begin`/`sys.commit`) are exempt because they are kernel control
+   syscalls, not capabilities.
 5. **Minimal TCB.** The kernel owns lifecycle, syscall dispatch, and enforcement —
    nothing else. Guard the boundary; helpers do not belong in the kernel.
 

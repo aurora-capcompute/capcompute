@@ -2,6 +2,7 @@ package sys
 
 import (
 	"encoding/json"
+	"sort"
 )
 
 // ABIVersion is the syscall wire version this kernel speaks. Guests declare
@@ -58,6 +59,7 @@ type SyscallResult struct {
 	errno   Errno
 	result  json.RawMessage
 	message string
+	labels  []string
 }
 
 func Result(result json.RawMessage) SyscallResult {
@@ -101,8 +103,39 @@ func (r SyscallResult) Message() string {
 	return r.message
 }
 
+// Labels returns the provenance labels stamped on this result — the source
+// classes its data derives from. Sorted and deduplicated.
+func (r SyscallResult) Labels() []string {
+	return append([]string(nil), r.labels...)
+}
+
+// WithLabels returns a copy of the result carrying the union of its labels
+// and the given ones, sorted and deduplicated (so journal digests are
+// deterministic).
+func (r SyscallResult) WithLabels(labels ...string) SyscallResult {
+	if len(labels) == 0 {
+		return r
+	}
+	merged := make(map[string]struct{}, len(r.labels)+len(labels))
+	for _, label := range r.labels {
+		merged[label] = struct{}{}
+	}
+	for _, label := range labels {
+		if label != "" {
+			merged[label] = struct{}{}
+		}
+	}
+	r.labels = make([]string, 0, len(merged))
+	for label := range merged {
+		r.labels = append(r.labels, label)
+	}
+	sort.Strings(r.labels)
+	return r
+}
+
 func (r SyscallResult) Copy() SyscallResult {
 	r.result = append(json.RawMessage(nil), r.result...)
+	r.labels = append([]string(nil), r.labels...)
 	return r
 }
 
@@ -113,6 +146,7 @@ type syscallResultJSON struct {
 	Code    Errno           `json:"code,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Message string          `json:"message,omitempty"`
+	Labels  []string        `json:"labels,omitempty"`
 }
 
 func (r SyscallResult) MarshalJSON() ([]byte, error) {
@@ -121,6 +155,7 @@ func (r SyscallResult) MarshalJSON() ([]byte, error) {
 		Code:    r.errno,
 		Result:  r.result,
 		Message: r.message,
+		Labels:  r.labels,
 	})
 }
 
@@ -134,6 +169,7 @@ func (r *SyscallResult) UnmarshalJSON(data []byte) error {
 		errno:   decoded.Code,
 		result:  decoded.Result,
 		message: decoded.Message,
+		labels:  decoded.Labels,
 	}
 	return nil
 }

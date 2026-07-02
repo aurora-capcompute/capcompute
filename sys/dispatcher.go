@@ -23,6 +23,15 @@ type Capability struct {
 	// undone when a run or scope aborts (saga unwinding). The zero value
 	// escalates: an undeclared effect is assumed irreversible.
 	Compensation Compensation `json:"compensation,omitzero"`
+	// Labels are the source classes this capability's results carry (e.g.
+	// "untrusted_web", "secret"). The provenance monitor stamps them onto
+	// every result and journals them — taint tracking starts here.
+	Labels []string `json:"labels,omitempty"`
+	// Forbid lists labels that may not flow into this capability's args
+	// (e.g. a destructive capability forbids "untrusted_web"). Because the
+	// guest is opaque, flow is judged conservatively: once a run has observed
+	// a label, everything it emits may derive from it.
+	Forbid []string `json:"forbid,omitempty"`
 }
 
 // CompensationKind classifies a capability's undo story.
