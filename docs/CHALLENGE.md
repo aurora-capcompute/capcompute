@@ -24,6 +24,7 @@ where the research exists only as papers. Each is labelled.
 | H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ |
 | I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ |
 | J | Capabilities are authorized-by-name, not unforgeable references | classification | low | ★ |
+| K | Journal record is an unprincipled column/payload hybrid (schema drift) | gap | medium | ★★ |
 
 ---
 
@@ -313,6 +314,56 @@ IPC/spawn).
 **Plan.** Document the model honestly in `ARCHITECTURE.md` ("authorized-by-cred,
 not by unforgeable token"). Revisit only if guest-to-guest capability delegation
 (finding I) is needed — then unforgeable refs become worth the cost.
+
+## K. The journal record is an unprincipled column/payload hybrid — schema drift
+
+**What it is.** In the storage layer (the runtime's `task.Record` + SQLite
+schema, in the out-of-scope `aurora-capcompute`/`aurora-stores` modules) some
+fields are promoted to columns and the rest live in a JSON payload — but the
+split is reactive (a column exists because some query once needed it), not
+principled. The result is the tell-tale pair of symptoms: *overcomplicated*
+(rigid columns nobody reasoned about, some data duplicated between column and
+JSON) **and** *vague* (load-bearing fields hidden in opaque JSON) at the same
+time. At the capcompute layer `journaled.Record{Syscall, Result}` is still clean;
+the drift is downstream, but the *contract* that lets it happen is defined here.
+
+**Why it's a gap.** "Overcomplicated + vague together" is the signature of
+schema drift, not of a hybrid that is too complex. A *principled* hybrid is
+actually the state of the art; an *ad-hoc* one gives you the worst of both:
+duplicated source of truth, unclear queryability, and a schema that changes
+every time a new record type appears.
+
+**State of the art (event-sourcing / log design).** One record = **uniform
+envelope + opaque payload**, with a single source of truth:
+- **Envelope** = the small fixed set the store must index/order/correlate on:
+  monotonic position, `kind` (intent | completion | savepoint | spawn |
+  message…), scope/PID, `prev_hash` (audit chain, ROADMAP #3), and a
+  **journaled** timestamp (not wall-clock — determinism law). These are the
+  columns, chosen by the rule "is this an index key?", not reactively.
+- **Payload** = domain content, **opaque to the store**, persisted as one blob —
+  and it is *the same envelope the ABI uses* (the ABI-v3 protobuf message becomes
+  the journal payload verbatim: wire format and journal payload unify).
+- **The rule that kills the drift**: a datum is *either* an envelope column *or*
+  in the payload, never both.
+Prior art: canonical event sourcing (immutable events, envelope + payload);
+Datomic's uniform facts; Kafka record headers vs value.
+
+**The payoff — this is simplification, not tidying.** The store schema becomes
+`(position, kind, scope, prev_hash, ts, payload)` and **stops changing**: a new
+syscall/record type never alters the schema, only the opaque payload. That is
+schema stability under feature growth — the same evolution concern that runs
+through versioned replay. It does *not* mean "put everything in a blob" (that
+over-corrects and loses queryability): columns are exactly the declared index
+keys (tenant/scope legitimately stays a column *because* it is one), everything
+else opaque, nothing duplicated.
+
+**Plan — a principle, not a milestone.** Fold the record-schema redesign into
+**M3.1** (which already reshapes the journal for intent/completion) and
+**ABI v3** (which sets the payload encoding), so the record is reshaped once, not
+three times. In capcompute: make the `journaled` record contract an explicit
+`{envelope, payload}` with the envelope fields above; document the single-source
+rule. The downstream SQLite/`task.Record` cleanup is `BLOCKED` on the
+out-of-scope runtime migration but must adopt the same contract when it lands.
 
 ---
 

@@ -101,6 +101,14 @@ unwound. This is the durability heart and the biggest audit-story win. DST
   DoD: crash-before-completion leaves a detectable open intent; replay surfaces
   it per policy; splits invariant #3 into journal-before-observe (held) +
   **journal-before-execute** (new) in `ARCHITECTURE.md`.
+  **Record-schema principle (CHALLENGE K), applied here since M3.1 reshapes the
+  record anyway):** one record = uniform **envelope** (position, `kind`
+  {intent|completion|savepoint|…}, scope/PID, `prev_hash`, journaled timestamp —
+  the store's index keys) + **opaque payload** (the syscall envelope, same shape
+  as the ABI). Single source of truth: a datum is an envelope column *or* in the
+  payload, never both. Goal: the store schema stops changing when new record
+  types appear. Downstream SQLite/`task.Record` adopt the same contract on the
+  runtime migration (blocked).
 - **M3.2 Compensation metadata + saga unwinding** — `BLOCKED(M3.1)` (ROADMAP #10)
   Add declared `Compensation` to `sys.Capability` (inverse syscall name, or
   explicit cannot-compensate). Kernel-level unwind: on scope abort, walk the
