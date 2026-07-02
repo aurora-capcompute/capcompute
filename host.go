@@ -67,7 +67,7 @@ func dispatchSyscall[ID comparable, K PID[ID]](
 			fmt.Sprintf("syscall abi %d, host speaks %d", syscall.Abi, sys.ABIVersion)))
 	}
 
-	result, err := process.dispatcher.Dispatch(ctx, process.GuestData, syscall, sys.Authorization{})
+	result, err := process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
 	if err != nil {
 		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, err.Error()))
 	}

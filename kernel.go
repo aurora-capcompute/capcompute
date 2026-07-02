@@ -49,8 +49,12 @@ type Kernel[ID comparable, K PID[ID]] struct {
 
 // Process owns the reusable Extism plugin instance for one PID.
 // Process state is not thread-safe; callers coordinate concurrent use.
+//
+// Cred is the host-side credential for the run: it identifies the process
+// (PID) and carries whatever authority context the app attaches. It is never
+// visible to or supplied by the guest.
 type Process[K any] struct {
-	GuestData  K
+	Cred       K
 	Input      json.RawMessage
 	Entrypoint string
 	plugin     *extism.Plugin
@@ -184,11 +188,11 @@ func (k *Kernel[ID, K]) Shutdown(ctx context.Context) error {
 }
 
 // ProcessSpec describes one process to create: its program input, entrypoint,
-// user data, and the dispatcher that will serve its syscalls.
+// credential, and the dispatcher that will serve its syscalls.
 type ProcessSpec[ID comparable, K PID[ID]] struct {
 	Input      json.RawMessage
 	Entrypoint string
-	UserData   K
+	Cred       K
 	Dispatcher sys.Dispatcher[K]
 }
 
@@ -255,7 +259,7 @@ func (k *Kernel[ID, K]) CreateProcess(ctx context.Context, spec ProcessSpec[ID, 
 		return nil, err
 	}
 	return &Process[K]{
-		GuestData:  spec.UserData,
+		Cred:       spec.Cred,
 		Input:      spec.Input,
 		Entrypoint: spec.Entrypoint,
 		plugin:     plugin,
@@ -274,7 +278,7 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 		return nil, err
 	}
 
-	pid := process.GuestData.PID()
+	pid := process.Cred.PID()
 	callCtx, cancel := context.WithCancel(ctx)
 	handle := &ResumeHandle[K]{
 		results: make(chan ResumeResult[K], 1),

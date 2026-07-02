@@ -43,7 +43,13 @@ type Authorization struct {
 }
 
 // Dispatcher owns policy and handler dispatch for guest syscalls.
+//
+// The syscall triad: cred is *who* is calling (the host-side credential for
+// the run — never guest-supplied), syscall is *what* is being asked, and auth
+// is *what has been granted* for this specific call (the resolved approval
+// context). Leaf drivers that only perform work should ignore cred; only
+// policy decorators (validation, approval, quotas) consume it.
 type Dispatcher[K any] interface {
-	Dispatch(ctx context.Context, guestData K, syscall Syscall, auth Authorization) (SyscallResult, error)
+	Dispatch(ctx context.Context, cred K, syscall Syscall, auth Authorization) (SyscallResult, error)
 	Capabilities() []Capability
 }

@@ -92,7 +92,7 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 			process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
 				Input:      input,
 				Entrypoint: "run",
-				UserData:   pid,
+				Cred:       pid,
 				Dispatcher: integrationDispatcher{},
 			})
 			if err != nil {
@@ -167,7 +167,7 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
 		Input:      input,
 		Entrypoint: "run",
-		UserData:   pid,
+		Cred:       pid,
 		Dispatcher: integrationDispatcher{},
 	})
 	if err != nil {
@@ -281,7 +281,7 @@ func TestTinyGoGuestAmbientReadsAreDeterministic(t *testing.T) {
 		process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
 			Input:      []byte(`{"mode":"ambient"}`),
 			Entrypoint: "run",
-			UserData:   pid,
+			Cred:       pid,
 			Dispatcher: integrationDispatcher{},
 		})
 		if err != nil {
@@ -348,7 +348,7 @@ func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
 	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
 		Input:      []byte(`{"mode":"http"}`),
 		Entrypoint: "run",
-		UserData:   pid,
+		Cred:       pid,
 		Dispatcher: integrationDispatcher{},
 	})
 	if err != nil {

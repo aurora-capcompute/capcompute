@@ -48,6 +48,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sys.SyscallResult{result\|yield\|failed}` | **Syscall result** | the value/effect returned to the guest |
 | `sys.Capability` | **Capability** | the exact capability-security term |
 | `sys.Authorization` | **Grant / approval context** | forward-propagated authority for a replayed action |
+| `Process.Cred` / `Dispatch(ctx, cred, …)` | **Credential** | host-side identity + authority context for the run; never guest-visible or guest-supplied |
 | `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult`; lists `Capabilities()` |
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
@@ -87,6 +88,15 @@ Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` fro
 their entrypoint. **This ABI is your POSIX: version it, keep it small, and treat
 changes as breaking.** It is the contract every driver and every LLM-generated
 component builds against.
+
+Host-side, every dispatch carries the **syscall triad**: `cred` (*who* — the
+host-side credential for the run; the guest never sees or supplies it),
+`syscall` (*what* is being asked), and `auth` (*what has been granted* for this
+specific call — the resolved approval context). Driver stratification follows
+from the triad: **leaf drivers that only perform work ignore `cred`; only
+policy decorators (validation, approval, quotas) consume it.** A leaf driver
+reading `cred` to make an authority decision is a layering smell — that
+decision belongs in a decorator in front of it.
 
 ## The five invariants (kernel laws)
 
@@ -232,19 +242,7 @@ Concurrency: like a filesystem shared across sessions, concurrent writers need
 coordination. v1 may be last-writer-wins on `memory.put`; compare-and-set is the
 upgrade. (See PLAN.md "Tenant memory".)
 
-## Shared state: the filesystem role
-
-Data shared *across* threads (conversations) has no home in the process/thread
-model — correctly so. In an OS, a **session is an execution scope, not a data
-scope**: sessions die, `$HOME` persists, and tomorrow's session reads the shell
-history yesterday's session wrote. Durable cross-session data lives in a third
-abstraction — the filesystem — reached through mediated access, never by
-widening the session boundary. Nobody merges two login sessions so they can
-see each other's variables.
-
-The scope hierarchy gives the data model three levels:
-
-| Scope | A
+## Coherence under growth: versioned replay
 
 This is the **known hard problem** for any journal-replay system, capcompute
 included. Name it now, because it is the fault line where the clean model meets

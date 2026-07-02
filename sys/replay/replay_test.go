@@ -34,8 +34,8 @@ func (t *tapeFunc) Remaining() int {
 
 type nextFunc[K any] func(context.Context, K, sys.Syscall, sys.Authorization) (sys.SyscallResult, error)
 
-func (f nextFunc[K]) Dispatch(ctx context.Context, key K, syscall sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
-	return f(ctx, key, syscall, auth)
+func (f nextFunc[K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
+	return f(ctx, cred, syscall, auth)
 }
 
 func (nextFunc[K]) Capabilities() []sys.Capability { return nil }
