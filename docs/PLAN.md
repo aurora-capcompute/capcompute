@@ -46,7 +46,7 @@ signature and is cheapest before more code piles on.
 Goal: the monitor validates *every* access. Closes the confused-deputy hole.
 Fully inside capcompute; no consumer break beyond a new decorator they opt into.
 
-- **M1.1 Grant-set + schema validation decorator** — `NEXT`
+- **M1.1 Grant-set + schema validation decorator** — `DONE` (`validate.go`)
   A kernel-provided `sys.Dispatcher` decorator that, before delegating:
   (1) checks the cred's granted capability set contains `syscall.Name` →
   `FailCode(ErrnoDenied)`; (2) validates `syscall.Args` against the capability's
@@ -65,7 +65,7 @@ Fully inside capcompute; no consumer break beyond a new decorator they opt into.
 Goal: no single process or tenant can exhaust the host. Two cheap wazero-native
 steps now; aggregate quotas ride the M5 scheduler seam.
 
-- **M2.1 Per-process memory cap + resume deadline** — `NEXT`
+- **M2.1 Per-process memory cap + resume deadline** — `DONE` (`Config.MaxMemoryPages`/`ResumeTimeout`)
   Kernel sets a wazero memory-page limit on the instance and an optional
   per-`Resume` wall-clock deadline (derives a child context from the resume ctx;
   you already cancel on ctx). Config fields `MaxMemoryPages`, `ResumeTimeout`.
@@ -88,7 +88,7 @@ Goal: nothing changes the world without a trace, and multi-step effects can be
 unwound. This is the durability heart and the biggest audit-story win. DST
 (M3.3) is the test home for the crash-timing correctness of M3.1–M3.2.
 
-- **M3.1 Intent/completion journal records** — `NEXT` (ROADMAP #9)
+- **M3.1 Intent/completion journal records** — `DONE` (two-record tape, `OpenIntentPolicy`, hash chain) (ROADMAP #9)
   Tape appends an **intent** record before dispatch, a **completion** after.
   Replay meeting an open intent at the tail = typed *indeterminate* condition
   (new error, not divergence) with per-capability policy (fail-for-review on
@@ -113,7 +113,7 @@ unwound. This is the durability heart and the biggest audit-story win. DST
   new record types appear; "log within thread" and "log within run" are index
   scans. Downstream SQLite/`task.Record` adopt the same contract on the runtime
   migration (blocked).
-- **M3.2 Compensation metadata + saga unwinding** — `BLOCKED(M3.1)` (ROADMAP #10)
+- **M3.2 Compensation metadata + saga unwinding** — `DONE` (`Capability.Compensation`, `saga.go`) (ROADMAP #10)
   Add declared `Compensation` to `sys.Capability` (inverse syscall name, or
   explicit cannot-compensate). Kernel-level unwind: on scope abort, walk the
   journal's completed effects in reverse and dispatch compensations — each
@@ -124,7 +124,7 @@ unwound. This is the durability heart and the biggest audit-story win. DST
   `capcompute/saga.go` (unwind walk), docs.
   DoD: an aborted scope compensates completed effects newest-first; a
   cannot-compensate effect escalates; unwinding is itself in the journal.
-- **M3.3 Deterministic simulation testing harness** — `BLOCKED(M3.1)` (ROADMAP #14, CHALLENGE D)
+- **M3.3 Deterministic simulation testing harness** — `DONE` (`sim/`) (ROADMAP #14, CHALLENGE D)
   A harness driving the kernel with a mock `ProcessTable` and a fault-injecting
   dispatcher; script a crash at *every* journal position; assert M3.1/M3.2
   invariants across the matrix (replay convergence, effect idempotency, no
@@ -139,14 +139,14 @@ Goal: track *where values come from and may flow*, not just what may be called.
 The frontier bet; the biggest differentiator (CaMeL applied as a kernel
 primitive). Staged so value lands before the deepest part.
 
-- **M4.1 Provenance labels on results** — `NEXT` (independent of M3; ROADMAP #11a)
+- **M4.1 Provenance labels on results** — `DONE` (`Capability.Labels`, `Labeler`) (ROADMAP #11a)
   `SyscallResult` carries a taint/label set (deriving capability + declared
   source class, e.g. `untrusted_web`, `secret`). Dispatcher stamps; journal
   records (provenance becomes part of the audit trail for free).
   Files: `sys/syscall.go` (`SyscallResult.Labels`), dispatcher stamping, journal
   record extension.
   DoD: results carry labels; labels are journaled and visible in the trace.
-- **M4.2 Flow policy at the reference monitor** — `BLOCKED(M4.1, M1.1)` (ROADMAP #11b)
+- **M4.2 Flow policy at the reference monitor** — `DONE` (`Capability.Forbid`, `FlowMonitor`) (ROADMAP #11b)
   The monitor rejects a syscall whose args carry labels the target capability
   forbids (`k8s.delete` may not take `untrusted_web` data) → `ErrnoDenied`.
   Label propagation lives at the dispatcher boundary (the guest is opaque), so
@@ -154,7 +154,7 @@ primitive). Staged so value lands before the deepest part.
   interpreter.
   DoD: a tainted-arg call to a protected capability is refused; policy is
   per-capability metadata.
-- **M4.3 Declassification as a governed operation** — `BLOCKED(M4.2)`
+- **M4.3 Declassification as a governed operation** — staged: `FlowMonitor.Declassify` (the mechanism) is `DONE`; the approval-composed syscall surface for it is `NEXT`
   Moving a value across a label boundary is an explicit operation that composes
   with `require_approval` (a human authorizes the crossing). DIFC declassify,
   gated by the approval flow you already have.
@@ -169,7 +169,7 @@ primitive). Staged so value lands before the deepest part.
 Goal: agents create and coordinate agents, governed and replayable. `cred`
 rename first (mechanical, unblocks everything), then spawn, then IPC.
 
-- **M5.0 Rename `guestData` → `cred`** — `NEXT` (discussion item, do early)
+- **M5.0 Rename `guestData` → `cred`** — `DONE` (discussion item)
   `Dispatch(ctx, cred K, …)`, `Process.GuestData` → `Cred`, `ProcessSpec.UserData`
   → `Cred`. Document the syscall triad (cred = who / syscall = what / auth =
   granted) and the driver-stratification rule (leaf drivers ignore cred; only
@@ -178,13 +178,13 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   DoD: renamed, builds/tests green in both repos, glossary + triad documented.
   Note: false-friend fix — "guestData" reads as guest-owned; it is host-side
   credentials.
-- **M5.1 Scheduler seam** — `SPEC`→`NEXT` (CHALLENGE F, ROADMAP #15)
+- **M5.1 Scheduler seam** — `SPEC` (CHALLENGE F, ROADMAP #15). Deliberately not built yet: sync-first spawn needed no scheduler (the child borrows the parent's quantum), and the app-owned scheduler this widens lives in the out-of-scope runtime — building the seam without its consumer would be speculative. Revisit when async spawn or aggregate quotas (M2.2) become real.
   Widen the app-owned scheduler into an interface with priority + admission
   hooks + virtual-actor activation/deactivation (bound resident memory; Orleans/
   Golem suspend-to-zero). Also the home for M2.2 aggregate quotas. Needed by
   spawn (children must be scheduled).
   DoD: a default fair-share scheduler; idle processes evict and reactivate.
-- **M5.2 `sys.spawn` decorator (sync-first)** — `BLOCKED(M5.0, M5.1, M3.1)` (ROADMAP #5)
+- **M5.2 `sys.spawn` decorator (sync-first)** — `DONE` (`spawn.go`; child cred derives from the spawn's idempotency key — stronger than the sketched spawn_seq — and child execution goes through the `ChildRunner` seam, `KernelChildRunner` kernel-backed) (ROADMAP #5)
   Kernel-provided decorator intercepting reserved `sys.SyscallSpawn`; delegates
   else. `spawn(program, input, capabilities)` with: capabilities enforced ⊑
   parent via `sys.Attenuate`; deterministic child PID `f(parentPID, spawnSeq,
@@ -216,7 +216,7 @@ Sessions are execution scope, not data scope; cross-thread memory belongs to the
 **tenant** level, reached as a capability, never by widening thread scope. This
 is a **driver-layer** feature, independent of the M1–M5 queue.
 
-- **M6.1 Tenant-scoped store capability** — `NEXT` (independent)
+- **M6.1 Tenant-scoped store capability** — `DONE` (`aurora-dispatchers/memory`, `core.memory` registration: tenant scoping, subtree chroot, approval-gated writes, replay re-read test)
   A `memory.get` / `memory.put` capability (file-flavoured `fs.*` also fine),
   implemented as a dispatcher/driver in `aurora-dispatchers` over a
   tenant-scoped KV store. The two kernel laws fix its form:
@@ -231,7 +231,7 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
   DoD: two threads of one tenant share state via get/put; a replay re-reads the
   journaled value; an agent attenuated to a subtree cannot read outside it;
   cross-tenant access denied.
-- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `BLOCKED(M4.1, M6.1)`
+- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `NEXT` (M4.1 and M6.1 both landed; store the value's labels on put, restamp on get)
   `memory.put` stores the value's labels (M4 provenance); `memory.get` surfaces
   them, so a value written from an `untrusted_web`-tainted run resurfaces in a
   later thread *as untrusted*, not as laundered truth. This is the differentiator
@@ -246,7 +246,7 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
 
 ---
 
-## ABI v3 — protobuf envelope  — `BLOCKED(M3.1, M4.1)`  (CHALLENGE E, decided)
+## ABI v3 — protobuf envelope  — `BLOCKED(TinyGo round-trip verification)`  (CHALLENGE E, decided; M3.1/M4.1 prerequisites landed)
 
 Decision recorded in CHALLENGE.md E: keep the uniform envelope (mediation
 uniformity — the seccomp/strace argument; wazero has no component model, so
@@ -268,15 +268,16 @@ record shape settles.
 
 ## Cross-cutting (do alongside, not as a milestone)
 
-- **Journal lifecycle** — `BLOCKED(M3.1)` (CHALLENGE G, supersedes ROADMAP #7):
+- **Journal lifecycle** — unblocked (M3.1 landed), `DEFER` until journals carry real volume (CHALLENGE G, supersedes ROADMAP #7):
   snapshot + compaction + retention once journals carry real intent/completion
   volume; verifiable archived segments via the hash-chain.
-- **Hash-chained journal** — `NEXT`, cheap (ROADMAP #3): `hash(prev)` per record;
-  tamper-evident audit. Do opportunistically with M3.1 (same file).
-- **Journal → OpenTelemetry** — `NEXT`, cheap (CHALLENGE H, ROADMAP #17): export
-  the journal as spans (syscall=span, yield=async boundary, cred=attributes).
-- **Kernel-law tests (laws 3–5)** — `BLOCKED(M3.1 for law 3)` (ROADMAP #2):
-  finish journal-before-execute and un-bypassable-approval assertions.
+- **Hash-chained journal** — `DONE` with M3.1 (ROADMAP #3): `prev_hash` per record,
+  `journaled.Verify` walks structure + chain.
+- **Journal → OpenTelemetry** — `DONE` (`otelexport/`) (CHALLENGE H, ROADMAP #17):
+  run=trace root, intent=span, completion folds in, open intent=error span.
+- **Kernel-law tests (laws 3–5)** — law 3 `DONE` (the `sim/` crash matrix asserts
+  journal-before-execute/observe); law 4's approval-gate assertion still lives
+  with the runtime's approval machinery (out of scope here).
 
 ## k8s-agent / runtime crossover — `BLOCKED(out-of-scope modules)`
 `aurora-capcompute` + `aurora-stores` must migrate to the renamed ABI before
@@ -288,10 +289,11 @@ as-inbound-drivers (ROADMAP #8), Manifest CRD OS-convention naming. Tracked in
 ---
 
 ## Recommended starting point
-Four `NEXT` items are independent and cheap — pick up in any order, or batch:
-**M1.1** (monitor validation), **M2.1** (mem cap + deadline), **M5.0** (`cred`
-rename), and the **hash-chain**/**OTel** cross-cutters. Then **M3.1** (intent
-records) as the first substantial piece, with **M3.3** (DST) right behind it to
-lock the correctness. **M4.1** (provenance labels) and **M6.1** (tenant memory —
-the shared-data / `$HOME` role, a driver) can both start in parallel — each is
-independent of M3. Everything deep (spawn, dual-LLM, IPC) hangs off those.
+The original four cheap items, M3 (intent records + compensation + DST), M4.1/2
+(provenance + flow policy), M5.2 (spawn), M6.1 (tenant memory), and the
+hash-chain/OTel cross-cutters are all `DONE`. The live frontier, in value
+order: **M6.2** (provenance-labelled memory — the memory-poisoning defense,
+now fully unblocked), **M4.3**'s declassification syscall surface, **ABI v3**
+once a TinyGo/prost protobuf round-trip is verified, and **M5.1/M5.3** when a
+scheduler consumer or async multiprocess need appears. The k8s-agent crossover
+stays blocked on the out-of-scope module migrations.

@@ -11,21 +11,21 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 0 | Ambient-surface lockdown (kernel owns guest WASI sources) | H | S | **done** (`ambient.go`, `ErrAmbientAuthority`) |
 | 1 | Journal program-versioning + replay compatibility check | H | S–M | **done** (`journaled.Header`, `ReplayIncompatibleError`) |
 | 2 | Kernel-law CI tests (the five invariants as tests) | H | S–M | partial — laws 1/2 tested (unit + TinyGo ambient/http modes); approval-gate test lives with the runtime |
-| 3 | Hash-chained journal (tamper-evident audit) | M–H | S | open |
+| 3 | Hash-chained journal (tamper-evident audit) | M–H | S | **done** (`prev_hash`, `journaled.Verify`) |
 | 4 | Capability attenuation helper in `sys` | M | S | **done** (`sys.Attenuate`) |
-| 5 | `process.spawn` syscall (sync-first child processes) | H | M | open |
+| 5 | `process.spawn` syscall (sync-first child processes) | H | M | **done** (`sys.spawn`, `spawn.go`) |
 | 6 | ABI v2 bundle: version field, errnos, savepoint syscalls | M | S | **done** (`sys.ABIVersion=2`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 7 | Snapshot/checkpoint to bound replay cost | M | L | deferred |
 | 8 | Sources-as-inbound-drivers refactor (aurora-k8s-agent) | M | M | deferred |
-| 9 | Intent/completion journal records (journal-before-execute) | H | M | open — next |
-| 10 | Compensation metadata + saga unwinding | H | M | open — after #9 |
-| 11 | Information-flow labels + provenance (CaMeL-style) | H | L | open — frontier (CHALLENGE.md A) |
-| 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | open (CHALLENGE.md B) |
-| 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | open — cheap (CHALLENGE.md C) |
-| 14 | Deterministic simulation testing harness | H | M | open (CHALLENGE.md D) |
+| 9 | Intent/completion journal records (journal-before-execute) | H | M | **done** (two-record tape, idempotency keys) |
+| 10 | Compensation metadata + saga unwinding | H | M | **done** (`Capability.Compensation`, `Unwind`) |
+| 11 | Information-flow labels + provenance (CaMeL-style) | H | L | **done** — labels+flow policy (`provenance.go`); declassify syscall surface open |
+| 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | **done** for per-process caps (`MaxMemoryPages`, `ResumeTimeout`); aggregate quotas ride the scheduler seam |
+| 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
+| 14 | Deterministic simulation testing harness | H | M | **done** (`sim/`, full crash matrix) |
 | 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | open (CHALLENGE.md F) |
-| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — supersedes #7 (CHALLENGE.md G) |
-| 17 | Journal→OpenTelemetry exporter | M | S | open — cheap (CHALLENGE.md H) |
+| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — unblocked by #9; do when volume is real |
+| 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
 
 ## 0. Ambient-surface lockdown
 
