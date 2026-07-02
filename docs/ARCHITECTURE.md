@@ -66,18 +66,26 @@ context), dispatches the `Syscall` through that process's driver chain, and
 returns a `SyscallResult`.
 
 ```
-Syscall:       { "abi": 2, "name": string, "args": <json> }
-SyscallResult: { "abi": 2,
-                 "status": "result" | "yield" | "failed",
-                 "code":   errno,    // when failed: denied | expired |
-                                     // not_found | invalid_args | transient |
-                                     // internal | bad_abi
-                 "result": <json>,   // when result
-                 "message": string } // when yield/failed
+Syscall  (proto3):  abi=1 (uint32, =3) · name=2 (string) · args=3 (bytes, JSON)
+Response (proto3):  abi=1 · status=2 (result|yield|failed) · code=3 (errno)
+                    · result=4 (bytes, JSON) · message=5 · labels=6 (repeated)
 ```
 
+Since v3 the envelope is protobuf (`sys/wire/envelope.proto` — the interop
+source of truth). The codec is hand-rolled and reflection-free (~200
+dependency-free lines shared by the host and the Go brain; the Rust brain
+mirrors it), which is what makes it TinyGo-safe without dragging
+`protoreflect` into guests; interop is pinned against protoc-generated
+reference code, cross-language golden fixtures, and an unknown-field-skipping
+test (the schema-evolution contract: add fields freely, never reuse a
+number). The `args`/`result` payloads stay opaque JSON — the envelope stays
+the one uniform shape generic interposition needs. Journal records keep
+canonical-JSON encoding: the wire and the store encoding are separate
+concerns, and the journal is the human-readable audit path.
+
 The envelope is versioned (`sys.ABIVersion`); the host rejects mismatches with
-errno `bad_abi`. Failures carry a machine-readable errno alongside the human
+errno `bad_abi` (a JSON envelope is classified as the pre-v3 wire, not as
+garbage). Failures carry a machine-readable errno alongside the human
 message so guests branch on a closed set instead of parsing prose. Two names
 are reserved for **redo scopes** — `sys.begin` / `sys.commit`
 (`sys.SyscallBegin`/`sys.SyscallCommit`), journaled as side-effect-free

@@ -246,25 +246,34 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
 
 ---
 
-## ABI v3 — protobuf envelope  — `BLOCKED(TinyGo round-trip verification)`  (CHALLENGE E, decided; M3.1/M4.1 prerequisites landed)
+## ABI v3 — protobuf envelope — `DONE` (CHALLENGE E)
 
 Decision recorded in CHALLENGE.md E: keep the uniform envelope (mediation
 uniformity — the seccomp/strace argument; wazero has no component model, so
 WIT would force a runtime switch), migrate the *encoding* to protobuf once the
 record shape settles.
 
-- Motivations in order: schema-evolution discipline for long-lived journals
-  (serves versioned replay); protovalidate/CEL as a stronger monitor policy
-  substrate; per-field sensitivity/provenance annotations via custom field
-  options (feeds M4); typed codegen. **Not** performance (in-process copy at
-  LLM-turn cadence).
-- Caveats: TinyGo needs codegen-only protobuf (vtprotobuf-style; `prost` for
-  Rust) — verify a TinyGo round-trip first; keep a `protojson` rendering path
-  so journals/audit stay human-readable.
-- Lands as a clean cut: `abi: 3` in the envelope; guests and host migrate
-  together (no backwards compatibility, per prototype policy).
-  DoD: proto envelope round-trips host↔both brains; journal records in proto
-  with protojson display; ABI v2 rejected with `bad_abi`.
+- Shipped as a clean cut: `abi: 3`; host and both brains migrated together;
+  a JSON envelope is refused with `bad_abi`.
+- **Deviation from the sketch, deliberate:** instead of vtprotobuf/prost
+  codegen in guests, the envelope codec is hand-rolled proto3 wire format
+  (`sys/wire`, ~200 dependency-free lines; mirrored in `brain-rs/src/wire.rs`).
+  This dissolves the TinyGo gate rather than passing it — no `protoreflect`
+  in any guest — and honors minimal-TCB. Interop is pinned three ways:
+  both-direction round-trips against protoc-generated reference code
+  (`sys/wire/internal/refpb`, regenerate with `protoc --go_out`), golden byte
+  fixtures shared verbatim between Go and Rust tests, and unknown-field
+  skipping (the schema-evolution contract). `envelope.proto` stays the
+  source of truth, so protovalidate/CEL and field annotations can adopt real
+  codegen later without a wire change.
+- **Journal records stay canonical JSON** — the wire and the store encoding
+  are separate concerns, and readable journals were the point of the
+  protojson caveat; store-side proto adoption rides the (blocked) runtime
+  migration if it ever pays.
+- Verified here: host round-trip + protoc interop (Go tests), Rust brain
+  `cargo test` + release build for wasm32-wasip1. The Go brain and the
+  integration guest share the host-tested codec and typecheck for wasip1;
+  their tinygo compile runs in CI (no tinygo in this container).
 
 ## Cross-cutting (do alongside, not as a milestone)
 
