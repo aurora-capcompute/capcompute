@@ -59,6 +59,7 @@ const (
 	ErrnoNotFound    Errno = "not_found"    // no handler/tool/resource by that name
 	ErrnoInvalidArgs Errno = "invalid_args" // request failed validation/decoding
 	ErrnoTransient   Errno = "transient"    // infrastructure failure; retry may succeed
+	ErrnoConflict    Errno = "conflict"     // optimistic concurrency: the expected version did not match
 	ErrnoInternal    Errno = "internal"     // unclassified failure
 	ErrnoBadABI      Errno = "bad_abi"      // syscall ABI version mismatch
 )
