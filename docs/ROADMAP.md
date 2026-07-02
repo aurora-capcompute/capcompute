@@ -20,10 +20,10 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 9 | Intent/completion journal records (journal-before-execute) | H | M | **done** (two-record tape, idempotency keys) |
 | 10 | Compensation metadata + saga unwinding | H | M | **done** (`Capability.Compensation`, `Unwind`) |
 | 11 | Information-flow labels + provenance (CaMeL-style) | H | L | **done** — labels, flow policy, and `sys.declassify` (`provenance.go`) |
-| 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | **done** for per-process caps (`MaxMemoryPages`, `ResumeTimeout`); aggregate quotas ride the scheduler seam |
+| 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | **done** (`MaxMemoryPages`/`ResumeTimeout`; `sched.Quota` + `Throttle` for aggregates) |
 | 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | H | M | **done** (`sim/`, full crash matrix) |
-| 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | open (CHALLENGE.md F) |
+| 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | **done** (`sched/`) |
 | 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — unblocked by #9; do when volume is real |
 | 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
 

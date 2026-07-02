@@ -74,9 +74,11 @@ steps now; aggregate quotas ride the M5 scheduler seam.
   infinite-loop guest is killed by deadline (extend existing "infinite" mode).
   DoD: a guest allocating past the cap traps as `ResumeFailed`; a guest past the
   deadline returns `ResumeStopped`; defaults are unlimited (opt-in).
-- **M2.2 Aggregate per-cred accounting** — `BLOCKED(M5.1 scheduler seam)`
-  Bytes / syscalls-per-sec / concurrent-process caps per cred, enforced in the
-  scheduler. Deferred to where the seam exists.
+- **M2.2 Aggregate per-cred accounting** — `DONE` (`sched.Quota` per-owner
+  concurrency caps as backpressure in the scheduler; `capcompute.Throttle`
+  token-bucket syscall rate limiting that delays, never denies — a wall-clock
+  refusal would break guest determinism. Aggregate bytes = per-owner
+  residency × `MaxMemoryPages`.)
 - **M2.3 Deterministic CPU fuel** — `DEFER` (frontier)
   True instruction-budget metering would make CPU part of journaled state, but
   wazero has no fuel; needs a shim or wasmtime. Revisit only if repro CPU limits
@@ -178,7 +180,11 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   DoD: renamed, builds/tests green in both repos, glossary + triad documented.
   Note: false-friend fix — "guestData" reads as guest-owned; it is host-side
   credentials.
-- **M5.1 Scheduler seam** — `SPEC` (CHALLENGE F, ROADMAP #15). Deliberately not built yet: sync-first spawn needed no scheduler (the child borrows the parent's quantum), and the app-owned scheduler this widens lives in the out-of-scope runtime — building the seam without its consumer would be speculative. Revisit when async spawn or aggregate quotas (M2.2) become real.
+- **M5.1 Scheduler seam** — `DONE` (`sched` package: Activate/Resume/Deactivate
+  seams with `KernelResume` binding; default fair-share scheduler — strict
+  priority bands, owner round-robin, per-owner quotas, virtual-actor residency
+  with LRU eviction and reactivation-by-replay; race-tested). The out-of-scope
+  runtime adopts it by supplying `Activate` (its replay wiring) at migration.
   Widen the app-owned scheduler into an interface with priority + admission
   hooks + virtual-actor activation/deactivation (bound resident memory; Orleans/
   Golem suspend-to-zero). Also the home for M2.2 aggregate quotas. Needed by
@@ -298,14 +304,15 @@ as-inbound-drivers (ROADMAP #8), Manifest CRD OS-convention naming. Tracked in
 ---
 
 ## Recommended starting point
-Everything schedulable without a new external dependency is `DONE`: M1, M2.1,
-all of M3, all of M4 (labels, flow policy, governed declassification), M5.0,
-M5.2, M6.1, M6.2, hash-chain, and the OTel exporter. What remains, and what
-each waits for: **ABI v3** waits on a verified TinyGo/prost protobuf
-round-trip (toolchain, not design); **M5.1 scheduler seam + M2.2 aggregate
-quotas** wait on a scheduler consumer in the runtime; **M5.3 IPC/supervision**
-(spec'd in ARCHITECTURE.md) and **M5.4** wait on a real concurrent workload;
-**M6.3 CAS** waits on real concurrent writers; **journal lifecycle** waits on
-real journal volume; the **k8s-agent crossover** waits on the out-of-scope
-module migrations. The next code in this repo should be pulled by one of
-those consumers, not pushed ahead of them.
+Every item buildable inside these repos is `DONE` — M1 through M6 (including
+ABI v3, the scheduler seam, aggregate quotas, CAS, and governed
+declassification). What remains, and the consumer each waits for: **M5.3
+IPC/supervision** and **M5.4** wait on a real concurrent workload (spec in
+ARCHITECTURE.md); **M6.3's** CAS is in but multi-writer pressure may motivate
+richer primitives; **journal lifecycle** waits on real volume; **M2.3
+deterministic CPU fuel** waits on a wazero fuel mechanism or a runtime
+switch; the **k8s-agent crossover** waits on the out-of-scope
+`aurora-capcompute`/`aurora-stores` migrations — which is also where the
+runtime picks up the scheduler seam, the validator/provenance chain, and the
+v3 wire. That migration is the single highest-value next move, and it lives
+outside this session's scope.

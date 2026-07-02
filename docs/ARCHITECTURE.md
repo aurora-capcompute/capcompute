@@ -252,6 +252,27 @@ stopped child returns a host error so the spawn intent stays open —
 outcome unknown, resolved on replay. Sync-first needs no scheduler: the child
 borrows the parent's quantum by construction.
 
+## Scheduling: the seam and the default
+
+The `sched` package splits the concern three ways: the scheduler decides
+*when* a process gets the CPU, the app decides *what* runs (`Activate` — for
+a durable run, journal replay), and the kernel decides *how* (`Resume`). The
+default is a fair-share scheduler: strict priority bands (High/Normal/Low),
+round-robin across *owners* (the aggregation key named at `Submit`, typically
+the tenant) inside a band, and per-owner concurrency quotas — the aggregate
+half of resource control — enforced as **backpressure, never rejection**
+(excess work waits; nothing fails because a neighbor is busy). Residency is
+virtual-actor shaped (Orleans/Golem): a process activates on demand, a
+yielded process stays warm, the least-recently-used idle process deactivates
+when residency exceeds its bound, and a terminated one deactivates
+immediately — the journal is the durable process, the instance is cache.
+
+The syscalls-per-second half is the `Throttle` dispatcher decorator: a
+per-key token bucket that only ever *delays*, never denies — a
+wall-clock-dependent refusal would be guest-visible nondeterminism, while a
+delay is invisible to a guest with no ambient clock (law #2 shapes even the
+rate limiter).
+
 ## IPC and supervision (spec — build when concurrency forces it)
 
 Sync-first `spawn` covers composition today. When agents must run
