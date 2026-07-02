@@ -336,10 +336,25 @@ every time a new record type appears.
 **State of the art (event-sourcing / log design).** One record = **uniform
 envelope + opaque payload**, with a single source of truth:
 - **Envelope** = the small fixed set the store must index/order/correlate on:
-  monotonic position, `kind` (intent | completion | savepoint | spawn |
-  message…), scope/PID, `prev_hash` (audit chain, ROADMAP #3), and a
-  **journaled** timestamp (not wall-clock — determinism law). These are the
-  columns, chosen by the rule "is this an index key?", not reactively.
+  the **scope hierarchy** (below), monotonic position, `kind` (intent |
+  completion | savepoint | spawn | message…), `prev_hash` (audit chain,
+  ROADMAP #3), and a **journaled** timestamp (not wall-clock — determinism
+  law). These are the columns, chosen by the rule "is this an index key?",
+  not reactively.
+- **The scope hierarchy is fixed, not ad hoc** — and Unix and distributed
+  tracing agree on its shape:
+  `tenant` (security principal) → `thread` (conversation = **session/SID**,
+  the controlling terminal) → `run` (**process/PID**) → `revision` (journal
+  fork/retry generation), plus `parent`/group once spawn exists (**PGID** —
+  the run tree). This is exactly OTel/W3C trace context (`trace_id` /
+  `span_id` / `parent_span_id`), so the journal→OTel exporter (finding H)
+  becomes a column mapping, not a translation layer. The runtime already
+  discovered this tuple empirically (`Scope{TenantID, ThreadID, RunID,
+  Revision}`) — bless it as *the* envelope scope. "Log within a thread" and
+  "log within a run(+revision)" must be index scans, never payload parses.
+  Ordering: `position` orders within one journal (run+revision); a per-thread
+  sequence orders across a thread's runs (safe because one run is active per
+  thread); the hash chain runs per journal.
 - **Payload** = domain content, **opaque to the store**, persisted as one blob —
   and it is *the same envelope the ABI uses* (the ABI-v3 protobuf message becomes
   the journal payload verbatim: wire format and journal payload unify).
