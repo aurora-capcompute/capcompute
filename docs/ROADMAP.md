@@ -19,6 +19,13 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 8 | Sources-as-inbound-drivers refactor (aurora-k8s-agent) | M | M | deferred |
 | 9 | Intent/completion journal records (journal-before-execute) | H | M | open — next |
 | 10 | Compensation metadata + saga unwinding | H | M | open — after #9 |
+| 11 | Information-flow labels + provenance (CaMeL-style) | H | L | open — frontier (CHALLENGE.md A) |
+| 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | open (CHALLENGE.md B) |
+| 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | open — cheap (CHALLENGE.md C) |
+| 14 | Deterministic simulation testing harness | H | M | open (CHALLENGE.md D) |
+| 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | open (CHALLENGE.md F) |
+| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — supersedes #7 (CHALLENGE.md G) |
+| 17 | Journal→OpenTelemetry exporter | M | S | open — cheap (CHALLENGE.md H) |
 
 ## 0. Ambient-surface lockdown
 
