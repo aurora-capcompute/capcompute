@@ -220,9 +220,22 @@ Agents creating agents is the **`spawn` syscall**. Design decisions, with prior 
   cascade-kill vs orphan-adopt on parent `Stop`. Study Erlang/OTP supervision trees
   before this grows.
 
-Implementation sketch: a new `sys.Syscall` (`process.spawn`) handled by a
-builtin driver whose handler calls `CreateProcess` + `SaveProcess`, drives or
-enqueues the child, and commits the child's result into the parent's replay tape.
+**Implemented** (`spawn.go`): the `Spawner` decorator serves the reserved
+`sys.spawn` syscall *below* the parent's replay layer, so a completed spawn is
+journaled like any syscall — replay serves the child's result without
+re-spawning. Requested capability names are resolved against the parent's
+grant set and pass `sys.Attenuate` (escalation → `denied`). The child cred is
+derived from the spawn's **idempotency key** — the intent identity
+`(run, position, call-hash)` — which is strictly stronger than the sketched
+`spawn_seq` counter: it is stable across crash-retries *and* re-entries, so a
+yielded child (transitive yield: child yields → parent's spawn yields) is
+re-found by deriving the same child and replaying its own journal. Child
+execution goes through the `ChildRunner` seam; `KernelChildRunner` is the
+kernel-backed implementation (create → register in the process table → resume
+→ close; the journal is the durable child, the instance is per-quantum). A
+stopped child returns a host error so the spawn intent stays open —
+outcome unknown, resolved on replay. Sync-first needs no scheduler: the child
+borrows the parent's quantum by construction.
 
 ## Persistence and replay
 

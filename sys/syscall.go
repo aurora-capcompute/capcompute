@@ -16,6 +16,10 @@ const ABIVersion = 2
 const (
 	SyscallBegin  = "sys.begin"
 	SyscallCommit = "sys.commit"
+	// SyscallSpawn creates a child process (sync-first: the parent's quantum
+	// runs the child; a yielding child yields the parent transitively). The
+	// kernel's Spawner decorator serves it.
+	SyscallSpawn = "sys.spawn"
 )
 
 // Syscall is the guest-to-host request crossing the syscall boundary.
