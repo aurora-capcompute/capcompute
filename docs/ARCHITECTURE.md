@@ -175,14 +175,76 @@ enqueues the child, and commits the child's result into the parent's replay tape
 
 ## Persistence and replay
 
-There is no filesystem. A process is durable because the kernel journals every
-syscall outcome; after a crash the kernel recreates the process from its persisted
-program + input and **replays the journal** to the exact interruption point. The
-same append-only journal is the **audit trail** — every input, effect, capability
-grant, and approval decision, in order. Durability and audit are one mechanism, by
-design (the write-ahead-log pattern: one log, crash-recovery + history).
+A process's *own* state has no filesystem: a process is durable because the
+kernel journals every syscall outcome; after a crash the kernel recreates the
+process from its persisted program + input and **replays the journal** to the
+exact interruption point. The same append-only journal is the **audit trail** —
+every input, effect, capability grant, and approval decision, in order.
+Durability and audit are one mechanism, by design (the write-ahead-log pattern:
+one log, crash-recovery + history).
 
-## Coherence under growth — the versioned-replay problem
+## Shared state: the filesystem role
+
+A session is an *execution* scope, not a *data* scope. Data that outlives and
+crosses runs/threads does **not** belong in the journal (which is per-run) and is
+**not** shared by widening thread scope — that is not what operating systems do.
+Unix keeps cross-session durable data in a *separate* abstraction, the
+**filesystem**, reached from any session through mediated (permissioned) access:
+your login session dies, `$HOME` persists, and tomorrow's shell reads the history
+yesterday's wrote. That is literally cross-thread agent memory.
+
+The scope hierarchy (`tenant → thread → run → revision`) says where shared data
+lives by *level*:
+
+- **run** — process memory; the journal; reconstructed by replay.
+- **thread** — conversation/session state (dialogue context, run sequence).
+- **tenant** — the `$HOME` role: cross-thread memory (preferences, learned
+  facts, standing context). **This is the shared-data home**; without it,
+  "data shared between threads" has no principled place.
+
+Two kernel laws dictate the *form* the tenant store must take — it is not a
+special case, it is a driver:
+
+1. **Determinism (law #2)** forbids ambient reads of shared mutable state (a
+   concurrent mutation from another thread would diverge replay). So the store
+   sits **behind a journaled syscall** (`memory.get`/`memory.put`, or
+   file-flavoured `fs.*`): the *read result* is committed to the journal, and
+   replay re-reads the recorded value regardless of the store's current
+   contents. This is identical to how the ultimate shared mutable store — the
+   internet — is already handled behind `internet.read`. Cross-thread memory is
+   *a shared mutable device behind a driver*.
+2. **No ambient authority (law #1)** makes it a **capability**: tenant-scoped,
+   attenuable per manifest (an agent sees only a subtree of the tenant's memory
+   — the grant tree does directory permissions for free), and governable
+   (`require_approval` may gate writes to standing memory). Cross-*tenant*
+   sharing is forbidden by default — multi-tenant isolation outranks the
+   metaphor (no Unix world-readable equivalent).
+
+Security payoff: **memory poisoning** (planting an instruction that the agent
+"remembers" and later treats as trusted) becomes visible and policeable — a
+write from a run whose inputs were `untrusted_web`-tainted stores that label
+with the value (M4 provenance), so a later read surfaces it as untrusted content
+rather than laundered truth. Most agent stacks bolt memory on as an ambient RAG
+lookup outside all governance; here it is a journaled, labelled, attenuated
+syscall.
+
+Concurrency: like a filesystem shared across sessions, concurrent writers need
+coordination. v1 may be last-writer-wins on `memory.put`; compare-and-set is the
+upgrade. (See PLAN.md "Tenant memory".)
+
+## Shared state: the filesystem role
+
+Data shared *across* threads (conversations) has no home in the process/thread
+model — correctly so. In an OS, a **session is an execution scope, not a data
+scope**: sessions die, `$HOME` persists, and tomorrow's session reads the shell
+history yesterday's session wrote. Durable cross-session data lives in a third
+abstraction — the filesystem — reached through mediated access, never by
+widening the session boundary. Nobody merges two login sessions so they can
+see each other's variables.
+
+The scope hierarchy gives the data model three levels:
+
+| Scope | A
 
 This is the **known hard problem** for any journal-replay system, capcompute
 included. Name it now, because it is the fault line where the clean model meets

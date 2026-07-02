@@ -209,6 +209,41 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   Only if guest-to-guest capability delegation (via IPC) is needed. Until then
   document the model as authorized-by-cred, not by unforgeable token.
 
+## M6 — Tenant memory: the filesystem role  (ARCHITECTURE "Shared state")
+
+Goal: a principled home for data shared *across threads* — the `$HOME` role.
+Sessions are execution scope, not data scope; cross-thread memory belongs to the
+**tenant** level, reached as a capability, never by widening thread scope. This
+is a **driver-layer** feature, independent of the M1–M5 queue.
+
+- **M6.1 Tenant-scoped store capability** — `NEXT` (independent)
+  A `memory.get` / `memory.put` capability (file-flavoured `fs.*` also fine),
+  implemented as a dispatcher/driver in `aurora-dispatchers` over a
+  tenant-scoped KV store. The two kernel laws fix its form:
+  (1) **determinism** — it goes *through* the journaled syscall path, so a read
+  result is committed and replay re-reads the recorded value regardless of later
+  mutations (identical to `internet.read`, the existing shared-mutable device);
+  (2) **no ambient authority** — tenant-scoped, attenuable per manifest (an agent
+  is granted only a subtree — the grant tree = directory permissions),
+  `require_approval`-gatable on writes. Cross-tenant sharing forbidden by default.
+  Files: new `aurora-dispatchers/memory/` (driver) + a store interface the app
+  supplies; capability schema in `registry`.
+  DoD: two threads of one tenant share state via get/put; a replay re-reads the
+  journaled value; an agent attenuated to a subtree cannot read outside it;
+  cross-tenant access denied.
+- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `BLOCKED(M4.1, M6.1)`
+  `memory.put` stores the value's labels (M4 provenance); `memory.get` surfaces
+  them, so a value written from an `untrusted_web`-tainted run resurfaces in a
+  later thread *as untrusted*, not as laundered truth. This is the differentiator
+  vs ambient-RAG memory (which launders provenance). Compose with M4.2 flow
+  policy (untrusted memory may not flow into privileged capabilities without
+  declassification).
+  DoD: a write's taint is stored and re-surfaced on read in a later thread;
+  flow policy blocks tainted memory reaching a protected capability.
+- **M6.3 Write concurrency: CAS** — `DEFER`
+  v1 is last-writer-wins on `memory.put`; add compare-and-set (version token in
+  the value) when concurrent writers across a tenant's threads become real.
+
 ---
 
 ## ABI v3 — protobuf envelope  — `BLOCKED(M3.1, M4.1)`  (CHALLENGE E, decided)
@@ -257,5 +292,6 @@ Four `NEXT` items are independent and cheap — pick up in any order, or batch:
 **M1.1** (monitor validation), **M2.1** (mem cap + deadline), **M5.0** (`cred`
 rename), and the **hash-chain**/**OTel** cross-cutters. Then **M3.1** (intent
 records) as the first substantial piece, with **M3.3** (DST) right behind it to
-lock the correctness. **M4.1** (provenance labels) can start in parallel — it is
+lock the correctness. **M4.1** (provenance labels) and **M6.1** (tenant memory —
+the shared-data / `$HOME` role, a driver) can both start in parallel — each is
 independent of M3. Everything deep (spawn, dual-LLM, IPC) hangs off those.
