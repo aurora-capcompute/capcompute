@@ -294,23 +294,34 @@ record shape settles.
   journal-before-execute/observe); law 4's approval-gate assertion still lives
   with the runtime's approval machinery (out of scope here).
 
-## k8s-agent / runtime crossover — `BLOCKED(out-of-scope modules)`
-`aurora-capcompute` + `aurora-stores` must migrate to the renamed ABI before
-aurora-k8s-agent can adopt any of the above. When they do: task `Kind` field
-(RESEARCH 2), attenuation-at-grant + revocation epochs (RESEARCH 4), sources-
-as-inbound-drivers (ROADMAP #8), Manifest CRD OS-convention naming. Tracked in
-`aurora-k8s-agent/AGENTS.md`.
+## k8s-agent / runtime crossover — `DONE` (runtime migration shipped)
+`aurora-capcompute` runs on the kernel head: Stack-assembled chains,
+hash-chained intent/completion journal over the event log (per-revision
+headers), open-intent durable tasks injecting the stored resolution as the
+dispatch Authorization, sys.begin/commit savepoint forking, and root runs as
+`sched.Scheduler` quanta (children ride the parent's quantum — the sync-spawn
+posture). `aurora-stores` ships ProcessTable, event log, leases, and a
+durable `journaled.Journal` with a Verify audit path. aurora-k8s-agent
+resolves the whole graph at real pins, green. Remaining crossover follow-ups
+tracked in `aurora-k8s-agent/AGENTS.md`: the `-llm`/`-k8s`/`-helm` driver
+modules still await their sys migration (unplugged behind a documented seam),
+plus `core.memory`/IFC fields on the Manifest CRD; task `Kind` (RESEARCH 2),
+attenuation-at-grant + revocation epochs (RESEARCH 4), and sources-as-inbound-
+drivers (ROADMAP #8) stay open design items.
 
 ---
 
 ## Recommended starting point
 Everything designed for these repos is `DONE` — M1 through M6 complete,
-including ABI v3, the scheduler, quotas, IPC, and supervision. The honest
-remainder: **M2.3** CPU fuel waits on a wazero fuel mechanism; **M5.4**
-unforgeable capability references wait on evidence that authorized-by-cred is
-insufficient; **journal lifecycle** waits on real volume (live compaction
-additionally needs guest-memory snapshots); and the **k8s-agent crossover**
-waits on the out-of-scope `aurora-capcompute`/`aurora-stores` migrations —
-the runtime migration that consumes the scheduler seam, the monitor chain,
-IPC, and the v3 wire in one move. That migration is the next real work, and
-it needs a session scoped to those repos.
+including ABI v3, the scheduler, quotas, IPC, and supervision — and the
+**runtime migration has shipped**: `aurora-capcompute`/`aurora-stores` consume
+the scheduler seam, the monitor chain, the journaled tape, and the v3 wire,
+with aurora-k8s-agent green on real pins. The honest remainder: **M2.3** CPU
+fuel waits on a wazero fuel mechanism; **M5.4** unforgeable capability
+references wait on evidence that authorized-by-cred is insufficient;
+**journal lifecycle** waits on real volume (live compaction additionally
+needs guest-memory snapshots); kernel **IPC/spawn seams** are wired but not
+yet consumed by the runtime (its delegation router predates them — folding
+delegation onto `sys.spawn` is a candidate next step); and the
+`-llm`/`-k8s`/`-helm` **driver modules** still await their mechanical sys
+migration (tracked in `aurora-k8s-agent/AGENTS.md`).
