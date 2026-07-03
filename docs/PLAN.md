@@ -15,8 +15,8 @@ Read the other docs for *why*; this doc is *what, in what order, and done-when*.
 Kernel/OS rename; ABI v2 (`abi` field, `sys.Errno`, `sys.begin`/`sys.commit`);
 ambient lockdown (`ambient.go`, `ErrAmbientAuthority`); journal program-
 versioning (`journaled.Header`, `ReplayIncompatibleError`); `sys.Attenuate`;
-kernel-law tests (laws 1–2). Consumers migrated; k8s-agent stays pre-rename
-pinned (blocked on out-of-scope `aurora-capcompute`/`aurora-stores`).
+kernel-law tests (laws 1–2). Consumers migrated (the full runtime migration
+shipped later — see the crossover section and the distribution epoch).
 
 ---
 
@@ -106,13 +106,13 @@ unwound. This is the durability heart and the biggest audit-story win. DST
   **Record-schema principle (CHALLENGE K), applied here since M3.1 reshapes the
   record anyway):** one record = uniform **envelope** + **opaque payload** (the
   syscall envelope, same shape as the ABI). Envelope = the fixed **scope
-  hierarchy** `tenant → thread (session/SID) → run (PID) → revision` (+ parent/
+  hierarchy** `tenant → session (SID) → run (PID) → revision` (+ parent/
   group PGID once spawn lands) plus `position`, `kind`
   {intent|completion|savepoint|…}, `prev_hash`, journaled timestamp — i.e. the
   store's index keys, aligned 1:1 with OTel trace/span/parent so the exporter
   is a column mapping. Single source of truth: a datum is an envelope column
   *or* in the payload, never both. Goal: the store schema stops changing when
-  new record types appear; "log within thread" and "log within run" are index
+  new record types appear; "log within session" and "log within run" are index
   scans. Downstream SQLite/`task.Record` adopt the same contract on the runtime
   migration (blocked).
 - **M3.2 Compensation metadata + saga unwinding** — `DONE` (`Capability.Compensation`, `saga.go`) (ROADMAP #10)
@@ -217,9 +217,9 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
 
 ## M6 — Tenant memory: the filesystem role  (ARCHITECTURE "Shared state")
 
-Goal: a principled home for data shared *across threads* — the `$HOME` role.
-Sessions are execution scope, not data scope; cross-thread memory belongs to the
-**tenant** level, reached as a capability, never by widening thread scope. This
+Goal: a principled home for data shared *across sessions* — the `$HOME` role.
+Sessions are execution scope, not data scope; cross-session memory belongs to the
+**tenant** level, reached as a capability, never by widening session scope. This
 is a **driver-layer** feature, independent of the M1–M5 queue.
 
 - **M6.1 Tenant-scoped store capability** — `DONE` (`aurora-dispatchers/memory`, `core.memory` registration: tenant scoping, subtree chroot, approval-gated writes, replay re-read test)
@@ -234,21 +234,21 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
   `require_approval`-gatable on writes. Cross-tenant sharing forbidden by default.
   Files: new `aurora-dispatchers/memory/` (driver) + a store interface the app
   supplies; capability schema in `registry`.
-  DoD: two threads of one tenant share state via get/put; a replay re-reads the
+  DoD: two sessions of one tenant share state via get/put; a replay re-reads the
   journaled value; an agent attenuated to a subtree cannot read outside it;
   cross-tenant access denied.
-- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `DONE` (`memory.put` stores the writer's taint via `sys.Taint`, `memory.get` restamps it; cross-thread poison test drives the full stack)
+- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `DONE` (`memory.put` stores the writer's taint via `sys.Taint`, `memory.get` restamps it; cross-session poison test drives the full stack)
   `memory.put` stores the value's labels (M4 provenance); `memory.get` surfaces
   them, so a value written from an `untrusted_web`-tainted run resurfaces in a
-  later thread *as untrusted*, not as laundered truth. This is the differentiator
+  later session *as untrusted*, not as laundered truth. This is the differentiator
   vs ambient-RAG memory (which launders provenance). Compose with M4.2 flow
   policy (untrusted memory may not flow into privileged capabilities without
   declassification).
-  DoD: a write's taint is stored and re-surfaced on read in a later thread;
+  DoD: a write's taint is stored and re-surfaced on read in a later session;
   flow policy blocks tainted memory reaching a protected capability.
 - **M6.3 Write concurrency: CAS** — `DEFER`
   v1 is last-writer-wins on `memory.put`; add compare-and-set (version token in
-  the value) when concurrent writers across a tenant's threads become real.
+  the value) when concurrent writers across a tenant's sessions become real.
 
 ---
 
@@ -311,17 +311,105 @@ drivers (ROADMAP #8) stay open design items.
 
 ---
 
+## The distribution epoch — target topology (decided 2026-07-03)
+
+The ecosystem contracts to three library repos and will grow two product
+repos; everything else is deprecated. Read this section as the successor to
+the milestone queue above: M1–M6 built the OS, this builds what ships it.
+
+**Surviving cores:**
+- `capcompute` — the kernel. Unchanged role.
+- `aurora-capcompute` — the runtime. Unchanged role; D0 vocabulary below.
+- `aurora-dispatchers` — the driver library (domain driver modules —
+  `-llm`/`-k8s`/`-helm` — migrate to `sys` and re-plug when needed).
+
+**New products (to be created):**
+- `aurora-dist` — the distribution: one binary compiling the runtime with a
+  chosen driver set and store implementations (absorbing `aurora-stores`'
+  role), exposing the runtime over **one HTTP+SSE API** — the single way in,
+  versioned `/v1` from day one. Owns the runtime-adjacent services that must
+  not live in terminals: **timer firing** (durable-wait resolution — today it
+  wrongly lives in a channel bridge), the **program registry + retention
+  query** (a program digest is decommissionable when no non-terminal run
+  references it), and a **static capability ceiling** (`CreateRun` refuses
+  manifests granting beyond the deployment's configured maximum —
+  `sys.Attenuate` at the door; defense in depth against a compromised policy
+  layer).
+- `aurora-cli` — the first terminal: a CLI binding directly to `aurora-dist`
+  (trusted local single-principal use; no policy layer between). Building it
+  validates the API's completeness before any networked connector exists.
+
+**The policy layer** (when multi-principal): a separate authorization
+service in front of `aurora-dist` — the microkernel move, mechanism in the
+distro / policy in a server. It owns: the **manifest registry**
+(named/versioned manifests; the runtime itself stores manifests only
+per-run, journaled — there is deliberately no manifest entity in the core),
+**principal authentication**, **per-credential capability ceilings**
+(attenuation-at-grant — RESEARCH 4 lands here), the **session directory**
+(session ↔ principals/binding/channel address: the session-level access
+control the distro deliberately lacks; also what makes sharing and
+cross-channel identity expressible — a directory, never a mirror of session
+state), **HITL resolution authority** (who may resolve which task — today
+resolution is bearer-token-only), and the **data-plane proxy** for
+terminals (full proxy first: the distro then has exactly one client and
+zero principal auth). Connectors (Telegram etc.) become pure terminals —
+transport + rendering + their own state, zero policy — attaching to
+sessions through it.
+
+**Deprecated:** `aurora-k8s-agent` (its CRD control plane may return as one
+backend of the policy layer's manifest registry; its chat cores as connector
+services), `aurora-stores` (implementations fold into `aurora-dist`),
+`aurora-brains` (the example-program workspace; program packaging moves to
+the distro pipeline — until then the runtime's integration tests build the
+agent program from the sibling checkout).
+
+**Upgrade doctrine** (why program upgrades stay a non-problem here, unlike
+immortal-worker systems): the unit of replay is the bounded **run** —
+sessions carry continuity as data (history, the log), never as live guest
+state. A run pins its program digest (the journal header refuses digest
+drift on resume); a hard restart may adopt a new digest. So upgrades are
+**drain-and-deprecate**: new runs bind the new program; parked runs drain
+within TaskTTL; decommission when the retention query says no non-terminal
+run references the digest, keeping exact old artifacts (content-addressed)
+until then. ABI bumps remain fleet-wide drain events by design. Dispatcher
+upgrades follow the same story once D0.2 lands.
+
+### D0 — executable now, inside the three surviving repos
+- **D0.1 Vocabulary cut: `thread` → `session`, `brain` → `program`.**
+  Session is the OS-correct term for the level that groups processes and is
+  what a controlling terminal attaches to; "thread" inverted the metaphor
+  (OS threads live *inside* processes). Program finishes a rename the kernel
+  (`Header.Program`, `sys.spawn`) and assembly already made. API, internals,
+  and wire (`session_id`, `program`, `ProgramDigest`, `ses_` id prefix, task
+  scopes, event payload fields) — a clean cut; old event logs do not fold.
+  The guest ABI names (`agent.input`/`agent.finish`/`aurora.log`) are the
+  program SDK's contract, not scope vocabulary — unchanged.
+- **D0.2 Restore quarantine.** `restore()` must not refuse to boot because a
+  historical run's manifest no longer validates against the compiled driver
+  set (today, decommissioning a dispatcher bricks boot). Quarantine instead:
+  warn, restore verbatim; an execution attempt fails with the provider's
+  error. This makes dispatcher upgrades drain-and-deprecate too.
+- **D0.3 Doc alignment.** The envelope scope hierarchy reads
+  `tenant → session → run → revision` with no gloss; shared-state prose
+  speaks sessions.
+
+### D1+ — in order, as the new repos are born
+- **D1 `aurora-dist`**: assemble runtime + drivers + stores; the API surface
+  (port of the k8s-agent webapi, `/v1`); timer firing; program registry +
+  retention; capability ceiling. The `resolution_token` and `session_id`
+  renames were the cautionary tales for why the API versions from birth.
+- **D2 `aurora-cli`** end-to-end against the API (expect the firehose
+  subscription to be the first discovered gap).
+- **D3 the policy layer + first real connector**, per the design above.
+
 ## Recommended starting point
-Everything designed for these repos is `DONE` — M1 through M6 complete,
-including ABI v3, the scheduler, quotas, IPC, and supervision — and the
-**runtime migration has shipped**: `aurora-capcompute`/`aurora-stores` consume
-the scheduler seam, the monitor chain, the journaled tape, and the v3 wire,
-with aurora-k8s-agent green on real pins. The honest remainder: **M2.3** CPU
-fuel waits on a wazero fuel mechanism; **M5.4** unforgeable capability
-references wait on evidence that authorized-by-cred is insufficient;
-**journal lifecycle** waits on real volume (live compaction additionally
-needs guest-memory snapshots); kernel **IPC/spawn seams** are wired but not
-yet consumed by the runtime (its delegation router predates them — folding
-delegation onto `sys.spawn` is a candidate next step); and the
-`-llm`/`-k8s`/`-helm` **driver modules** still await their mechanical sys
-migration (tracked in `aurora-k8s-agent/AGENTS.md`).
+Everything designed for these repos is `DONE` — M1 through M6, ABI v3, the
+scheduler, quotas, IPC, supervision, and the runtime migration. The work now
+follows the distribution epoch above: D0 executes immediately in the three
+surviving repos; D1 (`aurora-dist`) is the next repo to create. Standing
+deferrals, unchanged: **M2.3** CPU fuel waits on a wazero fuel mechanism;
+**M5.4** unforgeable capability references wait on evidence that
+authorized-by-cred is insufficient; **journal lifecycle** waits on real
+volume; kernel **IPC/spawn seams** are wired but not yet consumed by the
+runtime (folding delegation onto `sys.spawn` is a candidate once aurora-dist
+exists).

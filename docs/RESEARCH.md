@@ -131,7 +131,7 @@ literal subtree, so attenuation is structural (you can only hand down what is
 written under you). Subset checks on settings are **bespoke per registration**
 (`IsSubset` for internet origins, MCP tools; everything else demands byte
 equality). Revocation is the policy-digest rotation: any policy change stops
-the active run and rotates the whole conversation thread.
+the active run and rotates the whole session.
 
 **Prior art.** Subtree-as-grant matches capability-list construction
 (KeyKOS/seL4): authority is what you were handed, nothing ambient — validated
@@ -148,7 +148,7 @@ helper should define the uniform contract (`child ⊑ parent`, property-tested)
 that registrations implement, replacing ad-hoc `IsSubset` growth. For
 revocation, add a **grant generation** (epoch) to the dispatcher: bump on
 policy change, check at each dispatch — mid-run revocation becomes possible
-and thread rotation becomes the fallback, not the only tool.
+and session rotation becomes the fallback, not the only tool.
 
 ## 5. Task tokens are unnamed Macaroons — validated, one cheap upgrade available
 
@@ -186,7 +186,7 @@ alongside the ABI version field so it is one wire change.
 
 - **Event-sourced runtime, one goroutine per active run** — actor-per-run over
   an append-only log folded into projections: the BEAM/event-sourcing shape.
-  One-active-run-per-thread with `ErrConflict` is foreground job control.
+  One-active-run-per-session with `ErrConflict` is foreground job control.
 - **Inbox idempotency** — durable insert before offset advance, claim/complete
   for callbacks: the transactional-inbox pattern, correctly done, including
   the benign race between timer and human resolver (single-resolver lease,

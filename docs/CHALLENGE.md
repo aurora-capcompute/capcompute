@@ -223,7 +223,7 @@ so this lands as a clean cut (`abi: 3`), not a flag day.
 
 ## F. Scheduling: no fairness, admission control, priority, or activation
 
-**What it is.** One goroutine per active run; one-active-run-per-thread;
+**What it is.** One goroutine per active run; one-active-run-per-session;
 scheduling policy pushed entirely to the app. No priority, no fair queueing
 across tenants, no admission control / backpressure, no memory-bounding
 activation (idle processes stay resident).
@@ -247,7 +247,7 @@ to bound resident memory. Pairs with finding B's aggregate quotas. New ROADMAP
 
 ## G. No journal lifecycle — compaction, GC, retention
 
-**What it is.** The per-thread append-only log grows unbounded. Snapshotting is
+**What it is.** The per-session append-only log grows unbounded. Snapshotting is
 deferred (ROADMAP #7); there is no compaction, no retention policy, no GC of
 terminated runs.
 
@@ -343,18 +343,18 @@ envelope + opaque payload**, with a single source of truth:
   not reactively.
 - **The scope hierarchy is fixed, not ad hoc** — and Unix and distributed
   tracing agree on its shape:
-  `tenant` (security principal) → `thread` (conversation = **session/SID**,
+  `tenant` (security principal) → `session` (the conversation = **SID**,
   the controlling terminal) → `run` (**process/PID**) → `revision` (journal
   fork/retry generation), plus `parent`/group once spawn exists (**PGID** —
   the run tree). This is exactly OTel/W3C trace context (`trace_id` /
   `span_id` / `parent_span_id`), so the journal→OTel exporter (finding H)
   becomes a column mapping, not a translation layer. The runtime already
   discovered this tuple empirically (`Scope{TenantID, ThreadID, RunID,
-  Revision}`) — bless it as *the* envelope scope. "Log within a thread" and
+  Revision}`) — bless it as *the* envelope scope. "Log within a session" and
   "log within a run(+revision)" must be index scans, never payload parses.
-  Ordering: `position` orders within one journal (run+revision); a per-thread
-  sequence orders across a thread's runs (safe because one run is active per
-  thread); the hash chain runs per journal.
+  Ordering: `position` orders within one journal (run+revision); a per-session
+  sequence orders across a session's runs (safe because one run is active per
+  session); the hash chain runs per journal.
 - **Payload** = domain content, **opaque to the store**, persisted as one blob —
   and it is *the same envelope the ABI uses* (the ABI-v3 protobuf message becomes
   the journal payload verbatim: wire format and journal payload unify).

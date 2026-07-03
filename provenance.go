@@ -155,7 +155,7 @@ func (m *FlowMonitor[ID, K]) Dispatch(ctx context.Context, cred K, syscall sys.S
 
 	// Hand the run's taint downstream: drivers that store guest-derived data
 	// (tenant memory) persist it with the value, so provenance survives into
-	// later threads instead of being laundered.
+	// later sessions instead of being laundered.
 	result, err := m.next.Dispatch(sys.WithTaint(ctx, m.taints.snapshot(pid)), cred, syscall, auth)
 	if err != nil {
 		return result, err

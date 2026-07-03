@@ -1,6 +1,6 @@
 // Package otelexport renders a journal as OpenTelemetry spans: the run is the
 // trace root, each intent/completion pair is a span, and the record envelope
-// maps to attributes — the scope hierarchy (tenant → thread → run → revision)
+// maps to attributes — the scope hierarchy (tenant → session → run → revision)
 // aligns 1:1 with OTel trace/span/parent, so the exporter is a column mapping,
 // not a translation layer.
 //

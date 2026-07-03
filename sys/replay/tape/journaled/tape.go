@@ -53,7 +53,7 @@ type Header struct {
 
 // Record is one journal entry: a fixed envelope — the store's index keys —
 // plus an opaque payload. A datum lives in the envelope or in the payload,
-// never both. Scope columns above the run (tenant, thread, revision) belong
+// never both. Scope columns above the run (tenant, session, revision) belong
 // to the store that owns the Journal, keyed by Header.Run.
 type Record struct {
 	// Envelope.

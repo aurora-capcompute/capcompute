@@ -215,7 +215,7 @@ Consequences of the symmetry, used as design rules:
   human answers.
 - **Commands are job control.** `/cancel` = Ctrl-C (SIGINT to the foreground
   process = `Stop`), `/status` = job status, `/retry` = resume, `/new` = new
-  session. Conversation↔thread is the *controlling terminal ↔ session* binding.
+  session. A conversation *is* a session; its channel is the controlling terminal.
 - Unlike a classic byte-stream tty, sources are **durable and multiplexed**: the
   inbox is persisted before the poll offset advances (idempotent input across
   crashes), sessions survive restart. Model it as a persistent terminal server
@@ -329,32 +329,32 @@ one log, crash-recovery + history).
 ## Shared state: the filesystem role
 
 A session is an *execution* scope, not a *data* scope. Data that outlives and
-crosses runs/threads does **not** belong in the journal (which is per-run) and is
-**not** shared by widening thread scope — that is not what operating systems do.
+crosses runs/sessions does **not** belong in the journal (which is per-run) and is
+**not** shared by widening session scope — that is not what operating systems do.
 Unix keeps cross-session durable data in a *separate* abstraction, the
 **filesystem**, reached from any session through mediated (permissioned) access:
 your login session dies, `$HOME` persists, and tomorrow's shell reads the history
-yesterday's wrote. That is literally cross-thread agent memory.
+yesterday's wrote. That is literally cross-session agent memory.
 
-The scope hierarchy (`tenant → thread → run → revision`) says where shared data
+The scope hierarchy (`tenant → session → run → revision`) says where shared data
 lives by *level*:
 
 - **run** — process memory; the journal; reconstructed by replay.
-- **thread** — conversation/session state (dialogue context, run sequence).
-- **tenant** — the `$HOME` role: cross-thread memory (preferences, learned
+- **session** — conversation state (dialogue context, run sequence).
+- **tenant** — the `$HOME` role: cross-session memory (preferences, learned
   facts, standing context). **This is the shared-data home**; without it,
-  "data shared between threads" has no principled place.
+  "data shared between sessions" has no principled place.
 
 Two kernel laws dictate the *form* the tenant store must take — it is not a
 special case, it is a driver:
 
 1. **Determinism (law #2)** forbids ambient reads of shared mutable state (a
-   concurrent mutation from another thread would diverge replay). So the store
+   concurrent mutation from another session would diverge replay). So the store
    sits **behind a journaled syscall** (`memory.get`/`memory.put`, or
    file-flavoured `fs.*`): the *read result* is committed to the journal, and
    replay re-reads the recorded value regardless of the store's current
    contents. This is identical to how the ultimate shared mutable store — the
-   internet — is already handled behind `internet.read`. Cross-thread memory is
+   internet — is already handled behind `internet.read`. Cross-session memory is
    *a shared mutable device behind a driver*.
 2. **No ambient authority (law #1)** makes it a **capability**: tenant-scoped,
    attenuable per manifest (an agent sees only a subtree of the tenant's memory

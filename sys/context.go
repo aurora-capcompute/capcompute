@@ -34,7 +34,7 @@ func WithTaint(ctx context.Context, labels []string) context.Context {
 
 // Taint returns the run's accumulated taint. Drivers that *store* guest-
 // derived data (e.g. tenant memory) persist it with the value, so the data's
-// provenance survives into later threads instead of being laundered.
+// provenance survives into later sessions instead of being laundered.
 func Taint(ctx context.Context) []string {
 	labels, _ := ctx.Value(taintContextKey{}).([]string)
 	return labels
