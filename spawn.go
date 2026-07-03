@@ -41,8 +41,8 @@ type SpawnConfig[K any] struct {
 	// grants are attenuated under.
 	Grants GrantSource[K]
 	// DeriveCred mints the child credential. spawnKey is the spawn syscall's
-	// idempotency key — the intent identity (run, position, call-hash) — so
-	// the derived child is deterministic: a replayed or re-entered spawn
+	// idempotency key — the intent identity (process, position, call-hash) —
+	// so the derived child is deterministic: a replayed or re-entered spawn
 	// derives the same child, which is what lets a yielded child's journal be
 	// found again on resume.
 	DeriveCred func(parent K, spawnKey string, program string) K
@@ -147,7 +147,7 @@ func (s *Spawner[K]) Capabilities() []sys.Capability {
 // registers it in the process table (the syscall path finds it by PID), gives
 // it the CPU, and closes it once its quantum ends. childDispatcher wires the
 // child's own chain — its journal tape (keyed by the child's PID), validator,
-// and drivers over exactly the granted set (Stack.ForRun is the natural fit).
+// and drivers over exactly the granted set (Stack.ForProcess is the natural fit).
 //
 // A kernel is bound to one program image, so the runner is too: program names
 // what this kernel runs, and a spawn requesting anything else is refused

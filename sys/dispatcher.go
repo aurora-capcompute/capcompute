@@ -20,7 +20,7 @@ type Capability struct {
 	// name it already knows).
 	Hidden bool `json:"hidden,omitempty"`
 	// Compensation declares how a completed effect of this capability can be
-	// undone when a run or scope aborts (saga unwinding). The zero value
+	// undone when a process or scope aborts (saga unwinding). The zero value
 	// escalates: an undeclared effect is assumed irreversible.
 	Compensation Compensation `json:"compensation,omitzero"`
 	// Labels are the source classes this capability's results carry (e.g.
@@ -29,7 +29,7 @@ type Capability struct {
 	Labels []string `json:"labels,omitempty"`
 	// Forbid lists labels that may not flow into this capability's args
 	// (e.g. a destructive capability forbids "untrusted_web"). Because the
-	// guest is opaque, flow is judged conservatively: once a run has observed
+	// guest is opaque, flow is judged conservatively: once a process has observed
 	// a label, everything it emits may derive from it.
 	Forbid []string `json:"forbid,omitempty"`
 }
@@ -83,7 +83,7 @@ type Authorization struct {
 // Dispatcher owns policy and handler dispatch for guest syscalls.
 //
 // The syscall triad: cred is *who* is calling (the host-side credential for
-// the run — never guest-supplied), syscall is *what* is being asked, and auth
+// the process — never guest-supplied), syscall is *what* is being asked, and auth
 // is *what has been granted* for this specific call (the resolved approval
 // context). Leaf drivers that only perform work should ignore cred; only
 // policy decorators (validation, approval, quotas) consume it.

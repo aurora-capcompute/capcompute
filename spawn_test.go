@@ -142,7 +142,7 @@ func TestSpawnMapsChildOutcomes(t *testing.T) {
 // and a replayed parent never re-spawns.
 func TestSpawnUnderReplay(t *testing.T) {
 	journal := newMemJournal()
-	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:parent", Run: "parent"}
+	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:parent", Process: "parent"}
 	runner := &fakeRunner{results: []ResumeResult[testPID]{
 		{Status: ResumeYielded},
 		{Status: ResumeCompleted, Output: json.RawMessage(`{"status":"completed","answer":42}`)},

@@ -32,7 +32,7 @@ const (
 	// KindCompensationIntent records that an inverse syscall is about to
 	// undo the completed effect at the position its Compensates field names.
 	// The first compensation record ends the journal's execution section:
-	// an unwound run is terminal.
+	// an unwound process is terminal.
 	KindCompensationIntent Kind = "compensation_intent"
 	// KindCompensationCompletion records the outcome of the immediately
 	// preceding compensation intent.
@@ -40,21 +40,21 @@ const (
 )
 
 // Header identifies what wrote a journal: the syscall ABI version, the
-// program (e.g. an artifact digest), and the run (PID) the journal belongs
+// program (e.g. an artifact digest), and the process the journal belongs
 // to. Replay against a different writer is refused up front — the
 // versioned-replay law (see docs/ARCHITECTURE.md, "Coherence under growth")
-// — instead of failing later as a confusing divergence. Run also scopes the
-// intent identity, so idempotency keys are unique across runs.
+// — instead of failing later as a confusing divergence. Process also scopes
+// the intent identity, so idempotency keys are unique across processes.
 type Header struct {
 	ABI     int    `json:"abi"`
 	Program string `json:"program"`
-	Run     string `json:"run,omitempty"`
+	Process string `json:"process,omitempty"`
 }
 
 // Record is one journal entry: a fixed envelope — the store's index keys —
 // plus an opaque payload. A datum lives in the envelope or in the payload,
-// never both. Scope columns above the run (tenant, session, revision) belong
-// to the store that owns the Journal, keyed by Header.Run.
+// never both. Scope columns above the process (tenant, session, revision)
+// belong to the store that owns the Journal, keyed by Header.Process.
 type Record struct {
 	// Envelope.
 	Position int    `json:"position"`
@@ -122,15 +122,15 @@ func (e ChainBrokenError) Error() string {
 	return fmt.Sprintf("journal hash chain broken at position %d", e.Position)
 }
 
-// RunUnwoundError means execution replay reached the journal's compensation
-// section: this run was aborted and its effects compensated; it cannot be
-// resumed.
-type RunUnwoundError struct {
+// ProcessUnwoundError means execution replay reached the journal's
+// compensation section: this process was aborted and its effects compensated;
+// it cannot be resumed.
+type ProcessUnwoundError struct {
 	Position int
 }
 
-func (e RunUnwoundError) Error() string {
-	return fmt.Sprintf("run was unwound: compensation section starts at position %d", e.Position)
+func (e ProcessUnwoundError) Error() string {
+	return fmt.Sprintf("process was unwound: compensation section starts at position %d", e.Position)
 }
 
 // Tape is a journal-backed replay tape.
@@ -143,8 +143,8 @@ type Tape struct {
 
 // NewTape creates a journal-backed replay tape whose cursor starts at the
 // beginning. The header identifies the program about to run: a fresh journal
-// is stamped with it; a journal written by a different program, ABI, or run
-// is refused with ReplayIncompatibleError.
+// is stamped with it; a journal written by a different program, ABI, or
+// process is refused with ReplayIncompatibleError.
 func NewTape(journal Journal, header Header) (*Tape, error) {
 	recorded, ok, err := journal.Header()
 	if err != nil {
@@ -175,7 +175,7 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 		return sys.SyscallResult{}, false, err
 	}
 	if intent.Kind == KindCompensationIntent || intent.Kind == KindCompensationCompletion {
-		return sys.SyscallResult{}, false, RunUnwoundError{Position: t.cursor}
+		return sys.SyscallResult{}, false, ProcessUnwoundError{Position: t.cursor}
 	}
 	if intent.Kind != KindIntent || intent.Syscall == nil {
 		return sys.SyscallResult{}, false, CorruptJournalError{Position: t.cursor, Reason: "expected an intent record"}
@@ -209,7 +209,7 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 		return sys.SyscallResult{}, false, err
 	}
 	if completion.Kind == KindCompensationIntent || completion.Kind == KindCompensationCompletion {
-		return sys.SyscallResult{}, false, RunUnwoundError{Position: t.cursor + 1}
+		return sys.SyscallResult{}, false, ProcessUnwoundError{Position: t.cursor + 1}
 	}
 	if completion.Kind != KindCompletion || completion.Result == nil {
 		return sys.SyscallResult{}, false, CorruptJournalError{Position: t.cursor + 1, Reason: "expected a completion record"}
@@ -370,9 +370,9 @@ func Verify(journal Journal) error {
 	return nil
 }
 
-// intentKey is the intent identity — (run, position, call-hash) — used as the
-// idempotency key handed to drivers. It is deterministic, so a crash-retry of
-// the same intent recomputes the same key.
+// intentKey is the intent identity — (process, position, call-hash) — used as
+// the idempotency key handed to drivers. It is deterministic, so a
+// crash-retry of the same intent recomputes the same key.
 func (t *Tape) intentKey(position int, syscall sys.Syscall) (string, error) {
 	return intentKey(t.header, position, syscall)
 }

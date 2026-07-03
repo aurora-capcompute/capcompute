@@ -24,7 +24,7 @@ type GrantSource[K any] func(cred K) []sys.Capability
 // pass through: they are kernel markers, not capabilities.
 //
 // Policy refusals are results (StatusFailed), not Go errors: the guest sees a
-// classified errno and can react; the run does not crash.
+// classified errno and can react; the process does not crash.
 type Validator[K any] struct {
 	grants GrantSource[K]
 	next   sys.Dispatcher[K]

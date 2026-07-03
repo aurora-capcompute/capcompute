@@ -28,7 +28,7 @@ func (d *stackDriver) Capabilities() []sys.Capability { return flowCaps }
 // boundary. One test per load-bearing ordering property.
 func TestStackEnforcesCanonicalOrder(t *testing.T) {
 	journal := newMemJournal()
-	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
+	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "p1"}
 	driver := &stackDriver{}
 	mailbox := newMemMailbox[string]()
 
@@ -55,7 +55,7 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 				Mailbox:  mailbox,
 				ParsePID: func(to string) (string, error) { return to, nil },
 			},
-		}.ForRun(tape, driver)
+		}.ForProcess(tape, driver)
 		if err != nil {
 			t.Fatalf("for run: %v", err)
 		}
@@ -123,14 +123,14 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 }
 
 func TestStackRequiresItsPieces(t *testing.T) {
-	tape, _ := journaled.NewTape(newMemJournal(), journaled.Header{ABI: sys.ABIVersion, Program: "p", Run: "r"})
-	if _, err := (Stack[string, testPID]{Taints: NewTaints[string]()}).ForRun(tape, &recordingDispatcher{}); err == nil {
+	tape, _ := journaled.NewTape(newMemJournal(), journaled.Header{ABI: sys.ABIVersion, Program: "p", Process: "r"})
+	if _, err := (Stack[string, testPID]{Taints: NewTaints[string]()}).ForProcess(tape, &recordingDispatcher{}); err == nil {
 		t.Fatal("stack without Grants accepted")
 	}
-	if _, err := (Stack[string, testPID]{Grants: grantsFixture()}).ForRun(tape, &recordingDispatcher{}); err == nil {
+	if _, err := (Stack[string, testPID]{Grants: grantsFixture()}).ForProcess(tape, &recordingDispatcher{}); err == nil {
 		t.Fatal("stack without Taints accepted")
 	}
-	if _, err := (Stack[string, testPID]{Grants: grantsFixture(), Taints: NewTaints[string]()}).ForRun(tape, nil); err == nil {
+	if _, err := (Stack[string, testPID]{Grants: grantsFixture(), Taints: NewTaints[string]()}).ForProcess(tape, nil); err == nil {
 		t.Fatal("stack without drivers accepted")
 	}
 }

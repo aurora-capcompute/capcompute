@@ -31,7 +31,7 @@ type Tape interface {
 	// OpenIntentError.
 	Next(syscall sys.Syscall) (sys.SyscallResult, bool, error)
 	// Begin appends the intent record for a fresh syscall and returns its
-	// idempotency key: the intent identity (run, position, call-hash).
+	// idempotency key: the intent identity (process, position, call-hash).
 	Begin(syscall sys.Syscall) (string, error)
 	// Commit appends the completion record for the open intent.
 	Commit(result sys.SyscallResult) error

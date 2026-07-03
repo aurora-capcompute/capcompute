@@ -1,6 +1,6 @@
 // Context handoffs across the dispatcher chain: the replay layer hands
 // drivers the in-flight intent identity; the flow monitor hands them the
-// run's accumulated taint.
+// process's accumulated taint.
 package sys
 
 import "context"
@@ -8,7 +8,7 @@ import "context"
 type idempotencyKeyContextKey struct{}
 
 // WithIdempotencyKey attaches the intent identity of the in-flight syscall —
-// (run, position, call-hash) — to the dispatch context. The replay layer sets
+// (process, position, call-hash) — to the dispatch context. The replay layer sets
 // it before delegating; it is stable across crash-retries of the same intent.
 func WithIdempotencyKey(ctx context.Context, key string) context.Context {
 	return context.WithValue(ctx, idempotencyKeyContextKey{}, key)
@@ -24,15 +24,15 @@ func IdempotencyKey(ctx context.Context) (string, bool) {
 
 type taintContextKey struct{}
 
-// WithTaint attaches the run's accumulated taint — every label it has
+// WithTaint attaches the process's accumulated taint — every label it has
 // observed so far — to the dispatch context. The flow monitor sets it before
-// delegating; because the guest is opaque, anything the run emits (including
+// delegating; because the guest is opaque, anything the process emits (including
 // a value it writes to shared memory) may derive from any of these labels.
 func WithTaint(ctx context.Context, labels []string) context.Context {
 	return context.WithValue(ctx, taintContextKey{}, labels)
 }
 
-// Taint returns the run's accumulated taint. Drivers that *store* guest-
+// Taint returns the process's accumulated taint. Drivers that *store* guest-
 // derived data (e.g. tenant memory) persist it with the value, so the data's
 // provenance survives into later sessions instead of being laundered.
 func Taint(ctx context.Context) []string {

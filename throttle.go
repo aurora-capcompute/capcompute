@@ -8,9 +8,9 @@ import (
 	"github.com/aurora-capcompute/capcompute/sys"
 )
 
-// RateLimit is the cross-run token-bucket state behind syscall throttling —
-// shared by all of a host's per-run chains (Stack holds one), while the
-// Throttle decorator that consumes it is wired per run. It only ever *delays*
+// RateLimit is the cross-process token-bucket state behind syscall throttling —
+// shared by all of a host's per-process chains (Stack holds one), while the
+// Throttle decorator that consumes it is wired per process. It only ever *delays*
 // — never denies — because a wall-clock-dependent refusal would be
 // guest-visible nondeterminism, while a delay is invisible to a guest that
 // has no ambient clock. Backpressure, like the scheduler's quotas.
@@ -46,7 +46,7 @@ func NewRateLimit(rate float64, burst float64) *RateLimit {
 	}
 }
 
-// Forget releases a key's bucket once its runs are gone.
+// Forget releases a key's bucket once its processes are gone.
 func (l *RateLimit) Forget(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -79,9 +79,9 @@ func (l *RateLimit) reserve(key string) time.Duration {
 	return time.Duration(-b.tokens / l.rate * float64(time.Second))
 }
 
-// Throttle applies a shared RateLimit in front of one run's dispatcher chain
+// Throttle applies a shared RateLimit in front of one process's dispatcher chain
 // (CHALLENGE B, M2.2 — the syscalls-per-second half of aggregate resource
-// control). KeyOf picks the accounting bucket: cred→PID rate-limits each run,
+// control). KeyOf picks the accounting bucket: cred→PID rate-limits each process,
 // cred→tenant rate-limits an owner's aggregate.
 type Throttle[K any] struct {
 	limit *RateLimit

@@ -73,7 +73,7 @@ type IPCConfig[ID comparable, K PID[ID]] struct {
 // message at the same position — delivery order is journal order, never wall
 // clock), and both carry idempotency keys so crash-retries neither duplicate
 // a delivery nor skip a message. A receive on an empty mailbox yields: the
-// run parks until the app wakes it on delivery, the same protocol as any
+// process parks until the app wakes it on delivery, the same protocol as any
 // pending external task.
 type Messenger[ID comparable, K PID[ID]] struct {
 	config IPCConfig[ID, K]
@@ -163,7 +163,7 @@ func (m *Messenger[ID, K]) receive(ctx context.Context, cred K) (sys.SyscallResu
 	return sys.Result(result), nil
 }
 
-// Capabilities publishes sys.send and sys.recv (schema'd); whether a run may
+// Capabilities publishes sys.send and sys.recv (schema'd); whether a process may
 // call them is the manifest's decision, enforced by the Validator like any
 // capability.
 func (m *Messenger[ID, K]) Capabilities() []sys.Capability {

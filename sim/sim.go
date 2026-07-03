@@ -23,7 +23,7 @@ import (
 // ErrCrash is the injected fault: the process died at a journal append.
 var ErrCrash = errors.New("simulated crash")
 
-// PID is the simulated run identity.
+// PID is the simulated process identity.
 type PID struct{ ID string }
 
 func (p PID) PID() string { return p.ID }
@@ -111,7 +111,7 @@ type Step struct {
 // stopping at the first dispatch error (the crash).
 type Program []Step
 
-// Capabilities granted to every simulated run. transfer.out is compensatable,
+// Capabilities granted to every simulated process. transfer.out is compensatable,
 // mail.send is not (escalates), clock.now is a read, internet.read carries
 // taint, transfer.refund is the inverse.
 func Capabilities() []sys.Capability {
@@ -146,14 +146,14 @@ func (d driver) Dispatch(ctx context.Context, _ PID, syscall sys.Syscall, _ sys.
 func (d driver) Capabilities() []sys.Capability { return Capabilities() }
 
 // Chain builds the canonical dispatcher stack over the world, exactly as a
-// real deployment does — via Stack.ForRun, so the sim's crash matrix
+// real deployment does — via Stack.ForProcess, so the sim's crash matrix
 // exercises the same layer order production runs. Fails with
 // journaled.ReplayIncompatibleError etc. via the returned error.
-func Chain(world *World, run string) (sys.Dispatcher[PID], error) {
+func Chain(world *World, process string) (sys.Dispatcher[PID], error) {
 	tape, err := journaled.NewTape(world.Journal, journaled.Header{
 		ABI:     sys.ABIVersion,
 		Program: "sha256:sim",
-		Run:     run,
+		Process: process,
 	})
 	if err != nil {
 		return nil, err
@@ -162,15 +162,15 @@ func Chain(world *World, run string) (sys.Dispatcher[PID], error) {
 		Grants: func(PID) []sys.Capability { return Capabilities() },
 		Taints: capcompute.NewTaints[string](), // fresh per boot: a crash loses host memory
 	}
-	return stack.ForRun(tape, driver{effects: world.Effects})
+	return stack.ForProcess(tape, driver{effects: world.Effects})
 }
 
 // Run boots a fresh host process over the surviving world and drives the
 // program from the start (crash-restart semantics: all in-memory state is
 // new; only World persisted). It returns ErrCrash if the injected fault
 // fired, nil when the program ran to completion.
-func Run(world *World, run string, program Program) error {
-	chain, err := Chain(world, run)
+func Run(world *World, process string, program Program) error {
+	chain, err := Chain(world, process)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func Run(world *World, run string, program Program) error {
 		if step.Args != "" {
 			syscall.Args = json.RawMessage(step.Args)
 		}
-		result, err := chain.Dispatch(ctx, PID{ID: run}, syscall, sys.Authorization{})
+		result, err := chain.Dispatch(ctx, PID{ID: process}, syscall, sys.Authorization{})
 		if err != nil {
 			return err
 		}
@@ -191,8 +191,8 @@ func Run(world *World, run string, program Program) error {
 	return nil
 }
 
-// Unwind aborts the run and compensates it through the same driver.
-func Unwind(world *World, run string) ([]capcompute.CompensationOutcome, error) {
-	return capcompute.Unwind(context.Background(), PID{ID: run}, world.Journal,
+// Unwind aborts the process and compensates it through the same driver.
+func Unwind(world *World, process string) ([]capcompute.CompensationOutcome, error) {
+	return capcompute.Unwind(context.Background(), PID{ID: process}, world.Journal,
 		0, capcompute.NewLabeler[PID](driver{effects: world.Effects}))
 }

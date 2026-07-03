@@ -54,11 +54,11 @@ type CompensationArgs struct {
 // declared Compensation: reads are skipped, declared inverses are dispatched
 // through the supplied dispatcher (journaled as compensation records, each
 // carrying an idempotency key, composable with approval via yield), and
-// everything else escalates. Unwinding is crash-resumable: an interrupted run
+// everything else escalates. Unwinding is crash-resumable: an interrupted process
 // leaves an open compensation intent that a later Unwind resumes under the
 // original key.
 //
-// Unwinding a whole aborted run is Unwind(..., 0, ...); unwinding one scope
+// Unwinding a whole aborted process is Unwind(..., 0, ...); unwinding one scope
 // passes the scope's first journal position.
 func Unwind[K any](
 	ctx context.Context,

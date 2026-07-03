@@ -1,6 +1,6 @@
-// Package otelexport renders a journal as OpenTelemetry spans: the run is the
+// Package otelexport renders a journal as OpenTelemetry spans: the process is the
 // trace root, each intent/completion pair is a span, and the record envelope
-// maps to attributes — the scope hierarchy (tenant → session → run → revision)
+// maps to attributes — the scope hierarchy (tenant → session → process → revision)
 // aligns 1:1 with OTel trace/span/parent, so the exporter is a column mapping,
 // not a translation layer.
 //
@@ -25,7 +25,7 @@ import (
 // step is the synthetic per-record duration.
 const step = time.Millisecond
 
-// Export walks the journal and emits one root span for the run plus one child
+// Export walks the journal and emits one root span for the process plus one child
 // span per intent (execution and compensation alike). An intent without a
 // completion exports as an error span marked open_intent. Records are read
 // through the Journal interface only — exporting never mutates.
@@ -39,10 +39,10 @@ func Export(ctx context.Context, journal journaled.Journal, tracer trace.Tracer,
 	}
 
 	length := journal.Length()
-	rootCtx, root := tracer.Start(ctx, "run "+header.Run,
+	rootCtx, root := tracer.Start(ctx, "process "+header.Process,
 		trace.WithTimestamp(base),
 		trace.WithAttributes(
-			attribute.String("aurora.run", header.Run),
+			attribute.String("aurora.process", header.Process),
 			attribute.String("aurora.program", header.Program),
 			attribute.Int("aurora.abi", header.ABI),
 		))

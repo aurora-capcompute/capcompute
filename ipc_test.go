@@ -118,7 +118,7 @@ func TestIPCUnderReplay(t *testing.T) {
 
 	chain := func(t *testing.T, journal *memJournal, run string) sys.Dispatcher[testPID] {
 		t.Helper()
-		tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: run})
+		tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: run})
 		if err != nil {
 			t.Fatalf("new tape: %v", err)
 		}

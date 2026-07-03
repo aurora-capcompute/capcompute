@@ -40,7 +40,7 @@ var sagaCaps = []sys.Capability{
 func executedJournal(t *testing.T) *memJournal {
 	t.Helper()
 	journal := newMemJournal()
-	tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "run-1"})
+	tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "run-1"})
 	if err != nil {
 		t.Fatalf("new tape: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestResumeRefusedAfterUnwind(t *testing.T) {
 		t.Fatalf("unwind: %v", err)
 	}
 
-	tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "run-1"})
+	tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "run-1"})
 	if err != nil {
 		t.Fatalf("new tape: %v", err)
 	}
@@ -246,8 +246,8 @@ func TestResumeRefusedAfterUnwind(t *testing.T) {
 		}
 	}
 	_, _, err = tape.Next(sys.Syscall{Abi: sys.ABIVersion, Name: "another.call"})
-	var unwound journaled.RunUnwoundError
+	var unwound journaled.ProcessUnwoundError
 	if !errors.As(err, &unwound) {
-		t.Fatalf("error = %v, want RunUnwoundError", err)
+		t.Fatalf("error = %v, want ProcessUnwoundError", err)
 	}
 }

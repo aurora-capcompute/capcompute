@@ -9,7 +9,7 @@ import (
 	"github.com/aurora-capcompute/capcompute"
 )
 
-// Strategy is the OTP restart strategy, adapted to durable cooperative runs:
+// Strategy is the OTP restart strategy, adapted to durable cooperative processes:
 // "restarting" a sibling means stopping its quantum (the kernel kills the
 // guest; the journal survives) and resubmitting it — replay reconstructs it
 // exactly, so a restart loses no committed work.
@@ -43,7 +43,7 @@ type SupervisorConfig[ID comparable, K capcompute.PID[ID]] struct {
 	MaxRestarts int
 	Window      time.Duration
 	// OnExit reports a child leaving supervision: completed or yielded
-	// (normal — a yielded run parks until the app wakes it), stopped from
+	// (normal — a yielded process parks until the app wakes it), stopped from
 	// outside, or failed after the supervisor gave up. Optional.
 	OnExit func(pid ID, result capcompute.ResumeResult[K])
 }
@@ -153,7 +153,7 @@ func (s *Supervisor[ID, K]) handle(ctx context.Context, child ChildSpec[ID], res
 	delete(s.watching, child.PID)
 
 	if result.Status != capcompute.ResumeFailed || s.closed || s.gaveUp {
-		// Completed and yielded runs exit normally (a yielded run parks until
+		// Completed and yielded processes exit normally (a yielded process parks until
 		// the app wakes it — crashes are what supervision is for); external
 		// stops and post-give-up failures exit too.
 		s.mu.Unlock()

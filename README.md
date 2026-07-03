@@ -20,7 +20,7 @@ See `docs/ARCHITECTURE.md` for the OS model this library implements.
 The root `capcompute` package owns:
 
 - compiled program images (`Kernel`);
-- per-run process instances (`Process`);
+- process instances (`Process`);
 - the `Process`, `PID`, and `ProcessTable` vocabulary;
 - the `ProcessSpec` and `ResumeResult` lifecycle;
 - the `extism:host/compute/syscall` host function;
@@ -83,7 +83,7 @@ result channel. Calling `Stop` interrupts the invocation and permanently
 terminates that physical process instance.
 
 Calling `Resume` again on a stopped process returns `ErrProcessTerminated`.
-Recreate the logical run with `CreateProcess`, the same spec and PID, then
+Recreate the logical process with `CreateProcess`, the same spec and PID, then
 replace the old process in the table. A replay dispatcher can reuse previously
 committed results from the same journal. The syscall that was active during
 cancellation may execute again because it had no committed result.
@@ -95,7 +95,7 @@ returning a deterministic failed result.
 
 ## Process Model
 
-`Process` is the runtime object for one logical run. It contains:
+`Process` is the runtime object for one logical process. It contains:
 
 - user-owned guest data;
 - the original JSON input;
@@ -109,12 +109,12 @@ use of the same process.
 `PID` is implemented by user data:
 
 ```go
-type Run struct {
+type Proc struct {
 	ID string
 }
 
-func (r Run) PID() string {
-	return r.ID
+func (p Proc) PID() string {
+	return p.ID
 }
 ```
 
@@ -150,11 +150,11 @@ func hostSyscall(uint64) uint64
 ```
 
 The argument points to JSON matching `sys.Syscall` (`abi` must equal
-`sys.ABIVersion`, currently 2; mismatches fail with code `bad_abi`):
+`sys.ABIVersion`, currently 3; mismatches fail with code `bad_abi`):
 
 ```json
 {
-  "abi": 2,
+  "abi": 3,
   "name": "tool.name",
   "args": {"any": "json"}
 }
@@ -172,7 +172,7 @@ The host response has this shape:
 
 ```json
 {
-  "abi": 2,
+  "abi": 3,
   "status": "result",
   "result": {"any": "json"}
 }
@@ -188,7 +188,7 @@ The host response has this shape:
 
 Two syscall names are reserved for savepoint brackets: `sys.begin` and
 `sys.commit` (`sys.SyscallBegin`/`sys.SyscallCommit`). Hosts journal them as
-side-effect-free markers; on a failed-run resume the journal is forked just
+side-effect-free markers; on a failed-process resume the journal is forked just
 past the outermost unclosed `sys.begin` so the whole declared unit
 re-executes. Brackets have stack semantics.
 
@@ -237,19 +237,19 @@ if err != nil {
 }
 defer kernel.Shutdown(ctx)
 
-run := Run{ID: "run-1"}
-process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, Run]{
+proc := Proc{ID: "proc-1"}
+process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, Proc]{
 	Input:      json.RawMessage(`{"task":"example"}`),
 	Entrypoint: "run",
-	UserData:   run,
-	Dispatcher: runDispatcher{},
+	UserData:   proc,
+	Dispatcher: procDispatcher{},
 })
 if err != nil {
 	return err
 }
 defer process.Close(ctx)
 
-if err := table.SaveProcess(ctx, run.PID(), process); err != nil {
+if err := table.SaveProcess(ctx, proc.PID(), process); err != nil {
 	return err
 }
 
@@ -265,7 +265,7 @@ case capcompute.ResumeCompleted:
 case capcompute.ResumeYielded:
 	// Keep or persist enough state for the wrapping system to resume later.
 case capcompute.ResumeStopped:
-	// Recreate the process before resuming this logical run.
+	// Recreate the process before resuming this logical process.
 case capcompute.ResumeFailed:
 	// Inspect result.Err and apply application error policy.
 }
@@ -275,9 +275,9 @@ The dispatcher is application code, supplied per process through
 `ProcessSpec.Dispatcher`. It handles one process's syscalls:
 
 ```go
-type runDispatcher struct{}
+type procDispatcher struct{}
 
-func (runDispatcher) Dispatch(ctx context.Context, run Run, syscall sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
+func (procDispatcher) Dispatch(ctx context.Context, proc Proc, syscall sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
 	switch syscall.Name {
 	case "echo":
 		return sys.Result(syscall.Args), nil
@@ -288,7 +288,7 @@ func (runDispatcher) Dispatch(ctx context.Context, run Run, syscall sys.Syscall,
 	}
 }
 
-func (runDispatcher) Capabilities() []sys.Capability { return nil }
+func (procDispatcher) Capabilities() []sys.Capability { return nil }
 ```
 
 Replay dispatchers forward capability metadata from their wrapped dispatcher,

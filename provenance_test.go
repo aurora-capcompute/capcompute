@@ -93,7 +93,7 @@ func TestFlowMonitorDeclassify(t *testing.T) {
 // replayed results alone.
 func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
 	journal := newMemJournal()
-	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
+	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "p1"}
 
 	newChain := func(t *testing.T) *FlowMonitor[string, testPID] {
 		t.Helper()
@@ -135,7 +135,7 @@ func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
 // journaled; a crash-replay re-applies it without asking again.
 func TestDeclassifySyscallLifecycle(t *testing.T) {
 	journal := newMemJournal()
-	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
+	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "p1"}
 	newChain := func(t *testing.T) *FlowMonitor[string, testPID] {
 		t.Helper()
 		tape, err := journaled.NewTape(journal, header)

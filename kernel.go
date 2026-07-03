@@ -22,14 +22,14 @@ var (
 	ErrProcessTerminated    = errors.New("process is terminated")
 )
 
-// PID lets user-owned run data expose the stable process identity used for
+// PID lets user-owned process data expose the stable process identity used for
 // process maps. (Compare Go's stdlib `error` interface: the type and its one
 // method share a name.)
 type PID[ID comparable] interface {
 	PID() ID
 }
 
-// Config contains everything needed to compile a program and create per-run instances.
+// Config contains everything needed to compile a program and create per-process instances.
 //
 // Image is the program image (an Extism manifest naming the wasm and static
 // config). It must not grant ambient authority: AllowedHosts and AllowedPaths
@@ -62,7 +62,7 @@ type Kernel[ID comparable, K PID[ID]] struct {
 // Process owns the reusable Extism plugin instance for one PID.
 // Process state is not thread-safe; callers coordinate concurrent use.
 //
-// Cred is the host-side credential for the run: it identifies the process
+// Cred is the host-side credential for the process: it identifies the process
 // (PID) and carries whatever authority context the app attaches. It is never
 // visible to or supplied by the guest.
 type Process[K any] struct {

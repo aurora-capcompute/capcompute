@@ -19,7 +19,7 @@ func TestExportRendersRunAsTrace(t *testing.T) {
 		{Name: "transfer.out", Args: `{"amount":100}`},
 		{Name: "internet.read", Args: `{"url":"https://example.com"}`},
 	}
-	if err := sim.Run(world, "run-1", program); err != nil {
+	if err := sim.Run(world, "proc-1", program); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -31,12 +31,12 @@ func TestExportRendersRunAsTrace(t *testing.T) {
 		t.Fatalf("export: %v", err)
 	}
 	spans := recorder.Ended()
-	if len(spans) != 4 { // 3 syscalls + the run root
+	if len(spans) != 4 { // 3 syscalls + the process root
 		t.Fatalf("spans = %d, want 4: %+v", len(spans), spanNames(spans))
 	}
 
 	root := spans[len(spans)-1] // ended last
-	if root.Name() != "run run-1" {
+	if root.Name() != "process proc-1" {
 		t.Fatalf("root span = %q", root.Name())
 	}
 	rootTrace := root.SpanContext().TraceID()
@@ -44,7 +44,7 @@ func TestExportRendersRunAsTrace(t *testing.T) {
 	var sawLabels bool
 	for _, span := range spans[:len(spans)-1] {
 		if span.SpanContext().TraceID() != rootTrace {
-			t.Fatalf("span %q escaped the run trace", span.Name())
+			t.Fatalf("span %q escaped the process trace", span.Name())
 		}
 		if span.Parent().SpanID() != root.SpanContext().SpanID() {
 			t.Fatalf("span %q is not a child of the run", span.Name())
@@ -67,7 +67,7 @@ func TestExportMarksOpenIntent(t *testing.T) {
 		{Name: "clock.now"},
 		{Name: "transfer.out", Args: `{"amount":100}`},
 	}
-	if err := sim.Run(world, "run-1", program); err == nil {
+	if err := sim.Run(world, "proc-1", program); err == nil {
 		t.Fatal("expected the injected crash")
 	}
 

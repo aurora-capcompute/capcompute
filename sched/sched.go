@@ -44,14 +44,14 @@ type Quota struct {
 // Config wires a Scheduler. Activate and Resume are required.
 type Config[ID comparable, K capcompute.PID[ID]] struct {
 	// Activate loads or reconstructs the process for a PID — for a durable
-	// run, CreateProcess plus journal replay wiring. Called only when the
+	// process, CreateProcess plus journal replay wiring. Called only when the
 	// process is not resident.
 	Activate func(ctx context.Context, pid ID) (*capcompute.Process[K], error)
 	// Resume gives the process one quantum and returns its result stream —
 	// usually a thin wrapper over Kernel.Resume (see KernelResume).
 	Resume func(ctx context.Context, process *capcompute.Process[K]) (<-chan capcompute.ResumeResult[K], error)
 	// Deactivate releases a resident process (close the instance, keep the
-	// journal). Called on eviction and when a run terminates. Optional.
+	// journal). Called on eviction and when a process terminates. Optional.
 	Deactivate func(pid ID, process *capcompute.Process[K])
 
 	// QuotaOf reports an owner's quota. Nil means unlimited. Owners are the

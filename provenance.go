@@ -44,10 +44,11 @@ func (l *Labeler[K]) Capabilities() []sys.Capability {
 	return l.next.Capabilities()
 }
 
-// Taints is the cross-run taint state: every label each run has observed.
-// It is shared by all of a host's per-run monitor chains (Stack holds one),
-// while the FlowMonitor decorator that consumes it is wired per run — state
-// and wiring have different lifetimes, so they are different types.
+// Taints is the cross-process taint state: every label each process has
+// observed. It is shared by all of a host's per-process monitor chains (Stack
+// holds one), while the FlowMonitor decorator that consumes it is wired per
+// process — state and wiring have different lifetimes, so they are different
+// types.
 type Taints[ID comparable] struct {
 	mu       sync.Mutex
 	observed map[ID]map[string]struct{}
@@ -57,7 +58,7 @@ func NewTaints[ID comparable]() *Taints[ID] {
 	return &Taints[ID]{observed: make(map[ID]map[string]struct{})}
 }
 
-// Declassify removes labels from a run's accumulated taint — an explicit,
+// Declassify removes labels from a process's accumulated taint — an explicit,
 // governed crossing of a label boundary (DIFC declassification). Guests reach
 // it through the sys.declassify syscall (the Declassifier decorator), whose
 // approved result replays through the FlowMonitor and lands here; the direct
@@ -71,8 +72,8 @@ func (t *Taints[ID]) Declassify(pid ID, labels ...string) {
 	}
 }
 
-// ForgetRun releases a terminated run's taint state.
-func (t *Taints[ID]) ForgetRun(pid ID) {
+// ForgetProcess releases a terminated process's taint state.
+func (t *Taints[ID]) ForgetProcess(pid ID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.observed, pid)

@@ -39,7 +39,7 @@ func (j *fakeJournal) Append(record journaled.Record) error {
 
 func (j *fakeJournal) Length() int { return len(j.records) }
 
-var testHeader = journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "run-1"}
+var testHeader = journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "run-1"}
 
 func newTestTape(t *testing.T, journal journaled.Journal) *journaled.Tape {
 	t.Helper()
@@ -85,7 +85,7 @@ func TestNewTapeAcceptsMatchingHeader(t *testing.T) {
 }
 
 func TestNewTapeRefusesIncompatibleJournal(t *testing.T) {
-	recorded := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:other", Run: "run-1"}
+	recorded := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:other", Process: "run-1"}
 	journal := &fakeJournal{header: recorded, hasHeader: true}
 
 	_, err := journaled.NewTape(journal, testHeader)

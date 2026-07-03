@@ -330,7 +330,7 @@ the milestone queue above: M1–M6 built the OS, this builds what ships it.
   versioned `/v1` from day one. Owns the runtime-adjacent services that must
   not live in terminals: **timer firing** (durable-wait resolution — today it
   wrongly lives in a channel bridge), the **program registry + retention
-  query** (a program digest is decommissionable when no non-terminal run
+  query** (a program digest is decommissionable when no non-terminal process
   references it), and a **static capability ceiling** (`CreateRun` refuses
   manifests granting beyond the deployment's configured maximum —
   `sys.Attenuate` at the door; defense in depth against a compromised policy
@@ -364,14 +364,14 @@ the distro pipeline — until then the runtime's integration tests build the
 agent program from the sibling checkout).
 
 **Upgrade doctrine** (why program upgrades stay a non-problem here, unlike
-immortal-worker systems): the unit of replay is the bounded **run** —
+immortal-worker systems): the unit of replay is the bounded **process** —
 sessions carry continuity as data (history, the log), never as live guest
-state. A run pins its program digest (the journal header refuses digest
+state. A process pins its program digest (the journal header refuses digest
 drift on resume); a hard restart may adopt a new digest. So upgrades are
-**drain-and-deprecate**: new runs bind the new program; parked runs drain
-within TaskTTL; decommission when the retention query says no non-terminal
-run references the digest, keeping exact old artifacts (content-addressed)
-until then. ABI bumps remain fleet-wide drain events by design. Dispatcher
+**drain-and-deprecate**: new processes bind the new program; parked
+processes drain within TaskTTL; decommission when the retention query says
+no non-terminal process references the digest, keeping exact old artifacts
+(content-addressed) until then. ABI bumps remain fleet-wide drain events by design. Dispatcher
 upgrades follow the same story once D0.2 lands.
 
 ### D0 — executable now, inside the three surviving repos
@@ -392,6 +392,19 @@ upgrades follow the same story once D0.2 lands.
 - **D0.3 Doc alignment.** The envelope scope hierarchy reads
   `tenant → session → run → revision` with no gloss; shared-state prose
   speaks sessions.
+
+### D0.4 — the process vocabulary (decided 2026-07-03, cut with D1)
+`run` → `process`, completing the OS metaphor D0.1 started: a session groups
+processes the way a terminal session does, and the thing a session groups was
+still called a "run". The scope hierarchy reads `tenant → session → process →
+revision`; a process pins a program digest; a revision is one incarnation of
+a process (the kernel keys instances by `pid@revision`, so a forked retry can
+never resume a stale instance). Kernel surface: `Stack.ForProcess`,
+`Taints.ForgetProcess`, `journaled.Header.Process`, `ProcessUnwoundError`.
+Runtime surface and wire: `CreateProcess`/`GetProcess`, `process_id`, `proc_`
+id prefix, `process.state` events. Like D0.1 this is a clean cut — old event
+logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
+`sys.*`, entrypoint `run` — a wasm export name, not scope vocabulary).
 
 ### D1+ — in order, as the new repos are born
 - **D1 `aurora-dist`**: assemble runtime + drivers + stores; the API surface

@@ -48,7 +48,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sys.SyscallResult{result\|yield\|failed}` | **Syscall result** | the value/effect returned to the guest |
 | `sys.Capability` | **Capability** | the exact capability-security term |
 | `sys.Authorization` | **Grant / approval context** | forward-propagated authority for a replayed action |
-| `Process.Cred` / `Dispatch(ctx, cred, …)` | **Credential** | host-side identity + authority context for the run; never guest-visible or guest-supplied |
+| `Process.Cred` / `Dispatch(ctx, cred, …)` | **Credential** | host-side identity + authority context for the process; never guest-visible or guest-supplied |
 | `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult`; lists `Capabilities()` |
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
@@ -97,7 +97,7 @@ garbage). Failures carry a machine-readable errno alongside the human
 message so guests branch on a closed set instead of parsing prose. Two names
 are reserved for **redo scopes** — `sys.begin` / `sys.commit`
 (`sys.SyscallBegin`/`sys.SyscallCommit`), journaled as side-effect-free
-markers with stack semantics; failed-run resume forks the journal past the
+markers with stack semantics; failed-process resume forks the journal past the
 outermost unclosed bracket. Call them what they are: a redo scope can only
 *re-execute* its contents, never undo them — bracketing non-idempotent,
 un-keyed effects amplifies at-least-once execution (RESEARCH.md finding 9).
@@ -107,7 +107,7 @@ runs the kernel's saga unwinder (`Unwind`, `saga.go`) — completed effects are
 compensated newest-first, each compensation itself journaled
 (intent/completion, idempotency-keyed, crash-resumable) and composable with
 approval via yield; what cannot be undone mechanically escalates to a human
-with the journal — the terminal compensator. An unwound run is terminal:
+with the journal — the terminal compensator. An unwound process is terminal:
 resuming it fails with `RunUnwoundError`.
 
 Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` from
@@ -116,7 +116,7 @@ changes as breaking.** It is the contract every driver and every LLM-generated
 component builds against.
 
 Host-side, every dispatch carries the **syscall triad**: `cred` (*who* — the
-host-side credential for the run; the guest never sees or supplies it),
+host-side credential for the process; the guest never sees or supplies it),
 `syscall` (*what* is being asked), and `auth` (*what has been granted* for this
 specific call — the resolved approval context). Driver stratification follows
 from the triad: **leaf drivers that only perform work ignore `cred`; only
@@ -144,7 +144,7 @@ governance and durability claims *provable* rather than aspirational.
    **journal-before-execute** — an *intent* record is appended before a
    syscall's driver runs, so nothing changes the world without a trace; a
    crash between execute and commit leaves a detectable *open intent*, and
-   the intent identity `(run, position, call-hash)` is the idempotency key
+   the intent identity `(process, position, call-hash)` is the idempotency key
    handed to the driver, stable across retries. **Journal-before-observe** —
    the *completion* record is appended before the result becomes observable
    to the guest, so replay is exact. (`yield` is never committed — it is a
@@ -165,7 +165,7 @@ governance and durability claims *provable* rather than aspirational.
    a kernel primitive): capabilities declare the source classes their results
    carry (`Labels`, e.g. `untrusted_web`) and the classes that may not flow
    into their args (`Forbid`); because the guest is opaque, flow is judged
-   conservatively — every label a run observes taints everything it later
+   conservatively — every label a process observes taints everything it later
    emits. Declassification is the reserved `sys.declassify` syscall: every
    crossing names its labels and a reason, requires a human approval (there
    is no unapproved path — an unattended declassify would just be flow-policy
@@ -177,7 +177,7 @@ governance and durability claims *provable* rather than aspirational.
    approved crossings are journaled) and `FlowMonitor` above it (so a
    crash-restarted host rebuilds taint exactly from replayed results, and
    replayed declassifications lift labels in order). The monitor also hands
-   the run's taint downstream (`sys.Taint`) so drivers that store
+   the process's taint downstream (`sys.Taint`) so drivers that store
    guest-derived data persist its provenance. Chain order: `Validator` →
    `Throttle` → `FlowMonitor` → replay → `Labeler` → `Declassifier` →
    `Messenger` → `Spawner` → drivers — encoded in `Stack.ForRun`
@@ -253,7 +253,7 @@ journaled like any syscall — replay serves the child's result without
 re-spawning. Requested capability names are resolved against the parent's
 grant set and pass `sys.Attenuate` (escalation → `denied`). The child cred is
 derived from the spawn's **idempotency key** — the intent identity
-`(run, position, call-hash)` — which is strictly stronger than the sketched
+`(process, position, call-hash)` — which is strictly stronger than the sketched
 `spawn_seq` counter: it is stable across crash-retries *and* re-entries, so a
 yielded child (transitive yield: child yields → parent's spawn yields) is
 re-found by deriving the same child and replaying its own journal. Child
@@ -268,7 +268,7 @@ borrows the parent's quantum by construction.
 
 The `sched` package splits the concern three ways: the scheduler decides
 *when* a process gets the CPU, the app decides *what* runs (`Activate` — for
-a durable run, journal replay), and the kernel decides *how* (`Resume`). The
+a durable process, journal replay), and the kernel decides *how* (`Resume`). The
 default is a fair-share scheduler: strict priority bands (High/Normal/Low),
 round-robin across *owners* (the aggregation key named at `Submit`, typically
 the tenant) inside a band, and per-owner concurrency quotas — the aggregate
@@ -298,7 +298,7 @@ Implemented (PLAN M5.3):
   + event sourcing). Both sides carry idempotency keys and the app-supplied
   durable `Mailbox` dedups on them: a crash-retried send delivers once, a
   crash-retried receive re-reads the message it consumed. A receive on an
-  empty mailbox **yields** — the run parks until the app wakes it on
+  empty mailbox **yields** — the process parks until the app wakes it on
   delivery, the same protocol as any pending external task.
 - **Capability passing rides messages.** A message may carry capability names
   ⊆ the sender's grant set, checked by `sys.Attenuate` at send exactly like
@@ -306,14 +306,14 @@ Implemented (PLAN M5.3):
   **Unforgeable capability references (M5.4)** stay deferred: the model is
   authorized-by-cred, documented honestly (CHALLENGE J).
 - **Supervision** (`sched/supervisor.go`): OTP strategies adapted to durable
-  cooperative runs — "restart" means stop the quantum (`Scheduler.Stop`: a
+  cooperative processes — "restart" means stop the quantum (`Scheduler.Stop`: a
   queued quantum dequeues, a running one has its context cancelled and the
   kernel kills the guest) and resubmit; replay reconstructs the child
   exactly, so a restart loses no committed work. `one-for-one` /
   `one-for-all` / `rest-for-one`, with supervisor-wide restart intensity
   (max restarts per window; exceeded → give up and escalate through
   `OnExit`). Failures burn intensity; strategy-triggered sibling restarts do
-  not. Completed and yielded runs exit supervision normally — crashes are
+  not. Completed and yielded processes exit supervision normally — crashes are
   what supervision is for.
 
 ## Persistence and replay
@@ -329,18 +329,18 @@ one log, crash-recovery + history).
 ## Shared state: the filesystem role
 
 A session is an *execution* scope, not a *data* scope. Data that outlives and
-crosses runs/sessions does **not** belong in the journal (which is per-run) and is
+crosses processes/sessions does **not** belong in the journal (which is per-process) and is
 **not** shared by widening session scope — that is not what operating systems do.
 Unix keeps cross-session durable data in a *separate* abstraction, the
 **filesystem**, reached from any session through mediated (permissioned) access:
 your login session dies, `$HOME` persists, and tomorrow's shell reads the history
 yesterday's wrote. That is literally cross-session agent memory.
 
-The scope hierarchy (`tenant → session → run → revision`) says where shared data
+The scope hierarchy (`tenant → session → process → revision`) says where shared data
 lives by *level*:
 
-- **run** — process memory; the journal; reconstructed by replay.
-- **session** — conversation state (dialogue context, run sequence).
+- **process** — process memory; the journal; reconstructed by replay.
+- **session** — conversation state (dialogue context, process sequence).
 - **tenant** — the `$HOME` role: cross-session memory (preferences, learned
   facts, standing context). **This is the shared-data home**; without it,
   "data shared between sessions" has no principled place.
@@ -365,7 +365,7 @@ special case, it is a driver:
 
 Security payoff: **memory poisoning** (planting an instruction that the agent
 "remembers" and later treats as trusted) becomes visible and policeable — a
-write from a run whose inputs were `untrusted_web`-tainted stores that label
+write from a process whose inputs were `untrusted_web`-tainted stores that label
 with the value (M4 provenance), so a later read surfaces it as untrusted content
 rather than laundered truth. Most agent stacks bolt memory on as an ambient RAG
 lookup outside all governance; here it is a journaled, labelled, attenuated
@@ -405,7 +405,7 @@ v1*, replay must still produce a consistent process — and that is not free:
    same way the ABI is the driver-author's law.
 3. **Provide an escape hatch for breaking changes.** Options, cheapest first:
    - *drain* — finish all in-flight processes on v1 before deploying v2 (simplest;
-     often enough for short-lived runs);
+     often enough for short-lived processes);
    - *pinned replay* — replay each process against the exact version that wrote its
      journal, and only run *new* processes on the new version (Golem's default
      posture);
