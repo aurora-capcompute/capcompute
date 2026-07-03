@@ -415,11 +415,41 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   subscription to be the first discovered gap).
 - **D3 the policy layer + first real connector**, per the design above.
 
+### D1+D2 — DONE (2026-07-03)
+- **D1 `aurora-dist` shipped.** One binary: runtime + compiled-in drivers
+  (builtin, internet, MCP, memory, timer, `openaillm` — the LLM driver
+  migrated from `aurora-dispatchers-llm` into `aurora-dispatchers` under the
+  `sys` vocabulary) + stores absorbed from `aurora-stores` (in-memory and
+  SQLite: event log with `session_id`/`process_id` columns, leases, journal
+  store with Verify, and the tenant-memory KV). The `/v1` HTTP+SSE API adds
+  the **tenant firehose** (`GET /v1/events`: merged session streams,
+  monotonic seq, replay ring + snapshot-on-reconnect, at-least-once), and the
+  dist owns timer firing (restart-safe recovery re-arms from persisted
+  tasks), the program registry (directory scan, digest-diffed hot reload,
+  retention query) and the capability ceiling (`sys.Attenuate` at process
+  creation over statically derived grant names; open-ended MCP grants are
+  refused under a ceiling). Verified end-to-end with the real agent program
+  against a scripted OpenAI-compatible stub, including a full restart
+  mid-timer-wait.
+- **D2 `aurora-cli` shipped.** Pure-stdlib terminal over the dist API with
+  its own wire types; send/follow, journal/tasks rendering, approve/deny by
+  `resolution_token`, firehose watch. It did its job as the completeness
+  test immediately: it caught the per-session SSE double envelope (fixed —
+  the data field carries the payload; the event name lives in the SSE event
+  field) and, via its restart end-to-end, a **verbatim-marshal law** the
+  whole stack now obeys: durable renderings of syscalls and results must not
+  HTML-escape (`SetEscapeHTML(false)` end to end), or a restored process
+  re-issuing its own bytes diverges against its own journal.
+- Newly deprecated: `aurora-dispatchers-llm` (folded into
+  `aurora-dispatchers/openaillm`), `aurora-stores` (folded into
+  `aurora-dist/internal/store`).
+
 ## Recommended starting point
 Everything designed for these repos is `DONE` — M1 through M6, ABI v3, the
-scheduler, quotas, IPC, supervision, and the runtime migration. The work now
-follows the distribution epoch above: D0 executes immediately in the three
-surviving repos; D1 (`aurora-dist`) is the next repo to create. Standing
+scheduler, quotas, IPC, supervision, the runtime migration, and the
+distribution epoch through D2: the vocabulary cuts (D0.1–D0.4), the
+`aurora-dist` distribution, and the `aurora-cli` terminal. Next up is **D3**:
+the policy layer and the first real connector, per the design above. Standing
 deferrals, unchanged: **M2.3** CPU fuel waits on a wazero fuel mechanism;
 **M5.4** unforgeable capability references wait on evidence that
 authorized-by-cred is insufficient; **journal lifecycle** waits on real
