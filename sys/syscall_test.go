@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -31,14 +32,19 @@ func TestSyscallResultJSONRoundTrip(t *testing.T) {
 }
 
 // The durable rendering must carry guest bytes verbatim — no HTML escaping.
-// A journal that stores < for a guest's < would replay different bytes
-// than the guest re-issues.
+// A journal that stores \u003c for a guest's < would replay different bytes
+// than the guest re-issues. MarshalJSON emits verbatim bytes; the outer
+// encoder a store persists through must itself disable HTML escaping
+// (json.Marshal's compact step would re-escape a Marshaler's output).
 func TestSyscallResultMarshalKeepsHTMLCharactersVerbatim(t *testing.T) {
 	raw := `{"text":"<done> & gone"}`
-	data, err := json.Marshal(Result([]byte(raw)))
-	if err != nil {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(Result([]byte(raw))); err != nil {
 		t.Fatal(err)
 	}
+	data := buf.Bytes()
 	if !strings.Contains(string(data), raw) {
 		t.Fatalf("marshaled result = %s, want verbatim %s", data, raw)
 	}
