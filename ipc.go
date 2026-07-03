@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/aurora-capcompute/capcompute/sys"
 )
@@ -22,7 +21,8 @@ type Message struct {
 // are keyed by the calling syscall's idempotency key, which is what makes
 // at-least-once dispatch safe: a retried send must not duplicate a delivery,
 // and a retried receive must return the same message it consumed the first
-// time. MemMailbox is the reference implementation.
+// time. In-memory doubles live in tests; durable
+// implementations live in the stores module.
 type Mailbox[ID comparable] interface {
 	Append(ctx context.Context, to ID, key string, message Message) error
 	Receive(ctx context.Context, pid ID, key string) (Message, bool, error)
@@ -179,48 +179,4 @@ func (m *Messenger[ID, K]) Capabilities() []sys.Capability {
 			InputSchema: recvInputSchema,
 		},
 	)
-}
-
-// MemMailbox is the in-memory reference Mailbox — for tests and prototyping.
-// Production supplies a durable implementation with the same key semantics.
-type MemMailbox[ID comparable] struct {
-	mu       sync.Mutex
-	queues   map[ID][]Message
-	appended map[string]struct{} // send keys already delivered
-	consumed map[string]*Message // recv keys already served
-}
-
-func NewMemMailbox[ID comparable]() *MemMailbox[ID] {
-	return &MemMailbox[ID]{
-		queues:   make(map[ID][]Message),
-		appended: make(map[string]struct{}),
-		consumed: make(map[string]*Message),
-	}
-}
-
-func (m *MemMailbox[ID]) Append(_ context.Context, to ID, key string, message Message) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, duplicate := m.appended[key]; duplicate {
-		return nil // a retried send delivers once
-	}
-	m.appended[key] = struct{}{}
-	m.queues[to] = append(m.queues[to], message)
-	return nil
-}
-
-func (m *MemMailbox[ID]) Receive(_ context.Context, pid ID, key string) (Message, bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if served, retried := m.consumed[key]; retried {
-		return *served, true, nil // a retried receive re-reads its message
-	}
-	queue := m.queues[pid]
-	if len(queue) == 0 {
-		return Message{}, false, nil
-	}
-	next := queue[0]
-	m.queues[pid] = queue[1:]
-	m.consumed[key] = &next
-	return next, true, nil
 }

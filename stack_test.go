@@ -27,10 +27,10 @@ func (d *stackDriver) Capabilities() []sys.Capability { return flowCaps }
 // The Stack's reason to exist: each layer on its correct side of the replay
 // boundary. One test per load-bearing ordering property.
 func TestStackEnforcesCanonicalOrder(t *testing.T) {
-	journal := journaled.NewMemJournal()
+	journal := newMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
 	driver := &stackDriver{}
-	mailbox := NewMemMailbox[string]()
+	mailbox := newMemMailbox[string]()
 
 	// Everything the chain publishes is granted, plus the reserved syscalls.
 	grants := func(cred testPID) []sys.Capability {
@@ -123,7 +123,7 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 }
 
 func TestStackRequiresItsPieces(t *testing.T) {
-	tape, _ := journaled.NewTape(journaled.NewMemJournal(), journaled.Header{ABI: sys.ABIVersion, Program: "p", Run: "r"})
+	tape, _ := journaled.NewTape(newMemJournal(), journaled.Header{ABI: sys.ABIVersion, Program: "p", Run: "r"})
 	if _, err := (Stack[string, testPID]{Taints: NewTaints[string]()}).ForRun(tape, &recordingDispatcher{}); err == nil {
 		t.Fatal("stack without Grants accepted")
 	}

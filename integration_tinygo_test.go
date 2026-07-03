@@ -8,13 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	extism "github.com/extism/go-sdk"
 
 	"github.com/aurora-capcompute/capcompute"
-	"github.com/aurora-capcompute/capcompute/memory"
 	"github.com/aurora-capcompute/capcompute/sys"
 )
 
@@ -24,6 +24,34 @@ type integrationPID struct {
 
 func (k integrationPID) PID() string {
 	return k.id
+}
+
+// testProcessTable is an in-memory capcompute.ProcessTable. The kernel ships
+// only the interface; durable tables belong to consumer modules.
+type testProcessTable struct {
+	mu        sync.Mutex
+	processes map[string]*capcompute.Process[integrationPID]
+}
+
+func newTestProcessTable() *testProcessTable {
+	return &testProcessTable{processes: make(map[string]*capcompute.Process[integrationPID])}
+}
+
+func (t *testProcessTable) LoadProcess(_ context.Context, pid string) (*capcompute.Process[integrationPID], error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	process, ok := t.processes[pid]
+	if !ok {
+		return nil, capcompute.ErrProcessRequired
+	}
+	return process, nil
+}
+
+func (t *testProcessTable) SaveProcess(_ context.Context, pid string, process *capcompute.Process[integrationPID]) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.processes[pid] = process
+	return nil
 }
 
 type integrationDispatcher struct{}
@@ -51,7 +79,7 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := memory.NewProcessTable[string, integrationPID]()
+	table := newTestProcessTable()
 	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
@@ -136,7 +164,7 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := memory.NewProcessTable[string, integrationPID]()
+	table := newTestProcessTable()
 	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
@@ -259,7 +287,7 @@ func TestTinyGoGuestAmbientReadsAreDeterministic(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := memory.NewProcessTable[string, integrationPID]()
+	table := newTestProcessTable()
 	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
@@ -327,7 +355,7 @@ func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := memory.NewProcessTable[string, integrationPID]()
+	table := newTestProcessTable()
 	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
@@ -383,7 +411,7 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
 
-	newKernel := func(t *testing.T, table *memory.ProcessTable[string, integrationPID], config capcompute.Config[string, integrationPID]) *capcompute.Kernel[string, integrationPID] {
+	newKernel := func(t *testing.T, table *testProcessTable, config capcompute.Config[string, integrationPID]) *capcompute.Kernel[string, integrationPID] {
 		t.Helper()
 		config.Image = extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}}
 		config.PluginConfig = extism.PluginConfig{EnableWasi: true}
@@ -400,7 +428,7 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 		return kernel
 	}
 
-	resume := func(t *testing.T, kernel *capcompute.Kernel[string, integrationPID], table *memory.ProcessTable[string, integrationPID], mode string) capcompute.ResumeResult[integrationPID] {
+	resume := func(t *testing.T, kernel *capcompute.Kernel[string, integrationPID], table *testProcessTable, mode string) capcompute.ResumeResult[integrationPID] {
 		t.Helper()
 		pid := integrationPID{id: "run-" + mode}
 		input, err := json.Marshal(struct {
@@ -440,7 +468,7 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 	}
 
 	t.Run("memory cap traps the hog", func(t *testing.T) {
-		table := memory.NewProcessTable[string, integrationPID]()
+		table := newTestProcessTable()
 		kernel := newKernel(t, table, capcompute.Config[string, integrationPID]{
 			MaxMemoryPages: 256, // 16 MiB
 		})
@@ -454,7 +482,7 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 	})
 
 	t.Run("deadline stops the infinite loop", func(t *testing.T) {
-		table := memory.NewProcessTable[string, integrationPID]()
+		table := newTestProcessTable()
 		kernel := newKernel(t, table, capcompute.Config[string, integrationPID]{
 			ResumeTimeout: time.Second,
 		})

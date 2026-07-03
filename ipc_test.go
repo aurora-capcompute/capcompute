@@ -34,7 +34,7 @@ func ipcDispatch(t *testing.T, m *Messenger[string, testPID], pid, key, name, ar
 }
 
 func TestIPCSendRecvRoundTrip(t *testing.T) {
-	messenger := newMessenger(NewMemMailbox[string]())
+	messenger := newMessenger(newMemMailbox[string]())
 
 	sent := ipcDispatch(t, messenger, "alice", "k-send", sys.SyscallSend,
 		`{"to":"bob","payload":{"task":"review"},"capabilities":["mail.send"]}`)
@@ -57,7 +57,7 @@ func TestIPCSendRecvRoundTrip(t *testing.T) {
 }
 
 func TestIPCSendRefusesEscalation(t *testing.T) {
-	mailbox := NewMemMailbox[string]()
+	mailbox := newMemMailbox[string]()
 	messenger := newMessenger(mailbox)
 
 	result := ipcDispatch(t, messenger, "alice", "k-1", sys.SyscallSend,
@@ -71,7 +71,7 @@ func TestIPCSendRefusesEscalation(t *testing.T) {
 }
 
 func TestIPCEmptyMailboxYields(t *testing.T) {
-	messenger := newMessenger(NewMemMailbox[string]())
+	messenger := newMessenger(newMemMailbox[string]())
 	result := ipcDispatch(t, messenger, "bob", "k-1", sys.SyscallRecv, "")
 	if result.Status() != sys.StatusYield {
 		t.Fatalf("empty recv = %#v, want yield (parked until delivery)", result)
@@ -79,7 +79,7 @@ func TestIPCEmptyMailboxYields(t *testing.T) {
 }
 
 func TestIPCDeliveryIsOrderedAndKeyed(t *testing.T) {
-	messenger := newMessenger(NewMemMailbox[string]())
+	messenger := newMessenger(newMemMailbox[string]())
 
 	ipcDispatch(t, messenger, "alice", "k-s1", sys.SyscallSend, `{"to":"bob","payload":1}`)
 	ipcDispatch(t, messenger, "alice", "k-s1", sys.SyscallSend, `{"to":"bob","payload":1}`) // crash-retry: same key
@@ -113,10 +113,10 @@ func TestIPCDeliveryIsOrderedAndKeyed(t *testing.T) {
 // Under the replay layer: a replayed sender never re-sends, a replayed
 // receiver re-reads its journaled message without touching the mailbox.
 func TestIPCUnderReplay(t *testing.T) {
-	mailbox := NewMemMailbox[string]()
+	mailbox := newMemMailbox[string]()
 	messenger := newMessenger(mailbox)
 
-	chain := func(t *testing.T, journal *journaled.MemJournal, run string) sys.Dispatcher[testPID] {
+	chain := func(t *testing.T, journal *memJournal, run string) sys.Dispatcher[testPID] {
 		t.Helper()
 		tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: run})
 		if err != nil {
@@ -127,7 +127,7 @@ func TestIPCUnderReplay(t *testing.T) {
 	send := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSend, Args: json.RawMessage(`{"to":"bob","payload":"hi"}`)}
 	recv := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallRecv}
 
-	aliceJournal, bobJournal := journaled.NewMemJournal(), journaled.NewMemJournal()
+	aliceJournal, bobJournal := newMemJournal(), newMemJournal()
 	if _, err := chain(t, aliceJournal, "alice").Dispatch(context.Background(), testPID{id: "alice"}, send, sys.Authorization{}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestIPCUnderReplay(t *testing.T) {
 	if extra := ipcDispatch(t, messenger, "bob", "k-extra", sys.SyscallRecv, ""); extra.Status() != sys.StatusYield {
 		t.Fatalf("replayed send duplicated a delivery: %#v", extra)
 	}
-	for _, journal := range []*journaled.MemJournal{aliceJournal, bobJournal} {
+	for _, journal := range []*memJournal{aliceJournal, bobJournal} {
 		if err := journaled.Verify(journal); err != nil {
 			t.Fatalf("verify: %v", err)
 		}
@@ -159,7 +159,7 @@ func TestIPCUnderReplay(t *testing.T) {
 }
 
 func TestIPCRequiresIdempotencyKey(t *testing.T) {
-	messenger := newMessenger(NewMemMailbox[string]())
+	messenger := newMessenger(newMemMailbox[string]())
 	_, err := messenger.Dispatch(context.Background(), testPID{id: "alice"},
 		sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSend, Args: json.RawMessage(`{"to":"bob"}`)}, sys.Authorization{})
 	if err == nil || !strings.Contains(err.Error(), "idempotency key") {

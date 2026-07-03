@@ -37,9 +37,9 @@ var sagaCaps = []sys.Capability{
 }
 
 // executedJournal journals three completed effects: clock.now, transfer.out, mail.send.
-func executedJournal(t *testing.T) *journaled.MemJournal {
+func executedJournal(t *testing.T) *memJournal {
 	t.Helper()
-	journal := journaled.NewMemJournal()
+	journal := newMemJournal()
 	tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "run-1"})
 	if err != nil {
 		t.Fatalf("new tape: %v", err)

@@ -28,25 +28,47 @@ type PID struct{ ID string }
 
 func (p PID) PID() string { return p.ID }
 
-// Journal is journaled.MemJournal plus fault injection: when CrashAt equals
-// the number of appends performed so far, the append fails atomically
-// (nothing is persisted) with ErrCrash — the process died.
+// Journal is an in-memory journaled.Journal plus fault injection: when
+// CrashAt equals the number of appends performed so far, the append fails
+// atomically (nothing is persisted) with ErrCrash — the process died. The
+// kernel itself ships only the Journal interface; the harness owns this
+// simulated store the way consumer modules own the durable ones.
 type Journal struct {
-	*journaled.MemJournal
-	appends int
-	CrashAt int // -1 = never
+	header    journaled.Header
+	hasHeader bool
+	records   []journaled.Record
+	appends   int
+	CrashAt   int // -1 = never
 }
 
 func NewJournal() *Journal {
-	return &Journal{MemJournal: journaled.NewMemJournal(), CrashAt: -1}
+	return &Journal{CrashAt: -1}
 }
+
+func (j *Journal) Header() (journaled.Header, bool, error) { return j.header, j.hasHeader, nil }
+
+func (j *Journal) SetHeader(header journaled.Header) error {
+	j.header = header
+	j.hasHeader = true
+	return nil
+}
+
+func (j *Journal) Load(idx int) (journaled.Record, error) {
+	if idx < 0 || idx >= len(j.records) {
+		return journaled.Record{}, fmt.Errorf("journal: no record at %d", idx)
+	}
+	return j.records[idx], nil
+}
+
+func (j *Journal) Length() int { return len(j.records) }
 
 func (j *Journal) Append(record journaled.Record) error {
 	if j.appends == j.CrashAt {
 		return ErrCrash
 	}
 	j.appends++
-	return j.MemJournal.Append(record)
+	j.records = append(j.records, record)
+	return nil
 }
 
 // Effects is the external world: a keyed effect store, the way a real driver

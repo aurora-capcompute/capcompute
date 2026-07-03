@@ -92,7 +92,7 @@ func TestFlowMonitorDeclassify(t *testing.T) {
 // the journal, and a crash-restarted host must rebuild the run's taint from
 // replayed results alone.
 func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
-	journal := journaled.NewMemJournal()
+	journal := newMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
 
 	newChain := func(t *testing.T) *FlowMonitor[string, testPID] {
@@ -134,7 +134,7 @@ func TestFlowTaintSurvivesCrashReplay(t *testing.T) {
 // unapproved sys.declassify yields for a human; the approved crossing is
 // journaled; a crash-replay re-applies it without asking again.
 func TestDeclassifySyscallLifecycle(t *testing.T) {
-	journal := journaled.NewMemJournal()
+	journal := newMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Run: "p1"}
 	newChain := func(t *testing.T) *FlowMonitor[string, testPID] {
 		t.Helper()
