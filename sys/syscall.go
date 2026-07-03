@@ -1,6 +1,7 @@
 package sys
 
 import (
+	"bytes"
 	"encoding/json"
 	"sort"
 )
@@ -169,14 +170,23 @@ type syscallResultJSON struct {
 	Labels  []string        `json:"labels,omitempty"`
 }
 
+// MarshalJSON renders the durable/wire form without HTML escaping: the
+// guest's result bytes must survive storage verbatim, or a restored journal
+// would carry \u003c-escaped bytes the guest never produced.
 func (r SyscallResult) MarshalJSON() ([]byte, error) {
-	return json.Marshal(syscallResultJSON{
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(syscallResultJSON{
 		Status:  r.status,
 		Code:    r.errno,
 		Result:  r.result,
 		Message: r.message,
 		Labels:  r.labels,
-	})
+	}); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 func (r *SyscallResult) UnmarshalJSON(data []byte) error {
