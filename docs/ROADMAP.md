@@ -18,7 +18,7 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 7 | Snapshot/checkpoint to bound replay cost | M | L | deferred |
 | 8 | Sources-as-inbound-drivers refactor (aurora-k8s-agent) | M | M | deferred |
 | 9 | Intent/completion journal records (journal-before-execute) | H | M | **done** (two-record tape, idempotency keys) |
-| 10 | Compensation metadata + saga unwinding | H | M | **done** (`Capability.Compensation`, `Unwind`) |
+| 10 | Guest-registered compensation + abort-retry | H | M | **done** (`sys.compensate`, `sys.abort`; runtime-driven rollback) |
 | 11 | Information-flow labels + provenance (CaMeL-style) | H | L | **done** — labels, flow policy, and `sys.declassify` (`provenance.go`) |
 | 12 | Resource management (mem cap, resume deadline, aggregate quotas) | H | S–M | **done** (`MaxMemoryPages`/`ResumeTimeout`; `sched.Quota` + `Throttle` for aggregates) |
 | 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
@@ -122,14 +122,15 @@ handed to drivers. Splits invariant #3 into two laws: journal-before-observe
 (held today) and **journal-before-execute** (new). Cost: two appends per
 effectful syscall; classify capabilities (`effectful` vs read) later.
 
-## 10. Compensation metadata + saga unwinding
+## 10. Guest-registered compensation + abort-retry
 
 `sys.begin`/`sys.commit` are **redo scopes**, not savepoints — they can only
 re-execute, never undo, and re-execution amplifies at-least-once (RESEARCH.md
-finding 9). Add the missing layers: a declared **compensation** on
-`sys.Capability` (inverse syscall or explicit cannot-compensate); kernel-level
-**saga unwinding** — on abort of a scope, dispatch completed effects'
-compensations in reverse, journaled and composable with approval; TCC-shaped
-reservations where the effect side supports drafts/dry-runs; and escalation
-to the human (with the journal) as the first-class terminal compensator.
-Depends on #9 for the completed-effect records unwinding walks.
+finding 9). The undo layer is guest-authored, in the log: `sys.compensate`
+registers an effect's inverse (a deferred syscall, journaled with concrete
+args), and `sys.abort{reason, retry_seconds}` rolls the open scope back —
+registered compensations execute newest-first (journaled, idempotency-keyed,
+crash-resumable), then the scope retries after the declared delay (forking at
+its `sys.begin`) or the process stops as `compensated`. A failed compensation
+fails the process with the rollback report; capabilities stay pure access
+control (an earlier metadata-driven design was replaced by this one).

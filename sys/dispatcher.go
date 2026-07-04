@@ -19,10 +19,6 @@ type Capability struct {
 	// discoverable tool menu (e.g. the LLM cognition tool the brain calls by a
 	// name it already knows).
 	Hidden bool `json:"hidden,omitempty"`
-	// Compensation declares how a completed effect of this capability can be
-	// undone when a process or scope aborts (saga unwinding). The zero value
-	// escalates: an undeclared effect is assumed irreversible.
-	Compensation Compensation `json:"compensation,omitzero"`
 	// Labels are the source classes this capability's results carry (e.g.
 	// "untrusted_web", "secret"). The provenance monitor stamps them onto
 	// every result and journals them — taint tracking starts here.
@@ -32,31 +28,6 @@ type Capability struct {
 	// guest is opaque, flow is judged conservatively: once a process has observed
 	// a label, everything it emits may derive from it.
 	Forbid []string `json:"forbid,omitempty"`
-}
-
-// CompensationKind classifies a capability's undo story.
-type CompensationKind string
-
-const (
-	// CompensateNone marks a read-only capability: nothing to undo.
-	CompensateNone CompensationKind = "none"
-	// CompensateSyscall names an inverse capability to dispatch. The inverse
-	// receives {"compensates": <position>, "syscall": <original syscall>,
-	// "result": <original result>} as its args.
-	CompensateSyscall CompensationKind = "syscall"
-	// CompensateEscalate (also the meaning of an undeclared, empty Kind)
-	// marks an effect that cannot be undone mechanically: unwinding surfaces
-	// it, with the journal, to a human — the terminal compensator.
-	CompensateEscalate CompensationKind = "escalate"
-)
-
-// Compensation declares how to undo a completed effect (saga compensation,
-// Garcia-Molina 1987). It is capability metadata: policy decorators and the
-// kernel's unwinder consume it; leaf drivers only implement the inverse
-// capability it names.
-type Compensation struct {
-	Kind    CompensationKind `json:"kind,omitempty"`
-	Syscall string           `json:"syscall,omitempty"`
 }
 
 // Decision is the outcome of an external (human-in-the-loop) task approval.

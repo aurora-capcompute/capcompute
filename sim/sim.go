@@ -111,16 +111,15 @@ type Step struct {
 // stopping at the first dispatch error (the crash).
 type Program []Step
 
-// Capabilities granted to every simulated process. transfer.out is compensatable,
-// mail.send is not (escalates), clock.now is a read, internet.read carries
-// taint, transfer.refund is the inverse.
+// Capabilities granted to every simulated process. clock.now is a read,
+// internet.read carries taint, transfer.refund is transfer.out's inverse.
 func Capabilities() []sys.Capability {
 	return []sys.Capability{
-		{Name: "clock.now", Compensation: sys.Compensation{Kind: sys.CompensateNone}},
-		{Name: "internet.read", Labels: []string{"untrusted_web"}, Compensation: sys.Compensation{Kind: sys.CompensateNone}},
-		{Name: "transfer.out", Compensation: sys.Compensation{Kind: sys.CompensateSyscall, Syscall: "transfer.refund"}},
+		{Name: "clock.now"},
+		{Name: "internet.read", Labels: []string{"untrusted_web"}},
+		{Name: "transfer.out"},
 		{Name: "mail.send"},
-		{Name: "transfer.refund", Hidden: true, Compensation: sys.Compensation{Kind: sys.CompensateNone}},
+		{Name: "transfer.refund", Hidden: true},
 	}
 }
 
@@ -189,10 +188,4 @@ func Run(world *World, process string, program Program) error {
 		}
 	}
 	return nil
-}
-
-// Unwind aborts the process and compensates it through the same driver.
-func Unwind(world *World, process string) ([]capcompute.CompensationOutcome, error) {
-	return capcompute.Unwind(context.Background(), PID{ID: process}, world.Journal,
-		0, capcompute.NewLabeler[PID](driver{effects: world.Effects}))
 }

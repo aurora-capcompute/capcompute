@@ -101,14 +101,15 @@ markers with stack semantics; failed-process resume forks the journal past the
 outermost unclosed bracket. Call them what they are: a redo scope can only
 *re-execute* its contents, never undo them — bracketing non-idempotent,
 un-keyed effects amplifies at-least-once execution (RESEARCH.md finding 9).
-The undo layer is separate: a capability declares its `Compensation`
-(`none` for reads, an inverse syscall, or `escalate`), and aborting a scope
-runs the kernel's saga unwinder (`Unwind`, `saga.go`) — completed effects are
-compensated newest-first, each compensation itself journaled
-(intent/completion, idempotency-keyed, crash-resumable) and composable with
-approval via yield; what cannot be undone mechanically escalates to a human
-with the journal — the terminal compensator. An unwound process is terminal:
-resuming it fails with `ProcessUnwoundError`.
+The undo layer is separate and guest-authored: right after an effect the guest
+registers its inverse with `sys.compensate` (a deferred syscall — journaled
+with concrete args, not executed), and `sys.abort` rolls the open scope back —
+the runtime executes the registered compensations newest-first, each journaled
+(intent/completion, idempotency-keyed, crash-resumable), then retries the scope
+after the abort's declared delay or stops. Capabilities carry no compensation
+metadata: they are access control, and the undo story lives in the log, in
+guest-supplied terms. Replay refuses to run past a compensation record
+(`ProcessUnwoundError`) — a rolled-back tail never replays as if live.
 
 Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` from
 their entrypoint. **This ABI is your POSIX: version it, keep it small, and treat
