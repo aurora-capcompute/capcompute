@@ -42,9 +42,9 @@ func Export(ctx context.Context, journal journaled.Journal, tracer trace.Tracer,
 	rootCtx, root := tracer.Start(ctx, "process "+header.Process,
 		trace.WithTimestamp(base),
 		trace.WithAttributes(
-			attribute.String("aurora.process", header.Process),
-			attribute.String("aurora.program", header.Program),
-			attribute.Int("aurora.abi", header.ABI),
+			attribute.String("sys.process", header.Process),
+			attribute.String("sys.program", header.Program),
+			attribute.Int("sys.abi", header.ABI),
 		))
 	defer root.End(trace.WithTimestamp(base.Add(time.Duration(length+1) * step)))
 
@@ -62,12 +62,12 @@ func Export(ctx context.Context, journal journaled.Journal, tracer trace.Tracer,
 
 		start := base.Add(time.Duration(position) * step)
 		attributes := []attribute.KeyValue{
-			attribute.Int("aurora.journal.position", record.Position),
-			attribute.String("aurora.journal.kind", string(record.Kind)),
-			attribute.String("aurora.syscall.args", string(record.Syscall.Args)),
+			attribute.Int("sys.journal.position", record.Position),
+			attribute.String("sys.journal.kind", string(record.Kind)),
+			attribute.String("sys.syscall.args", string(record.Syscall.Args)),
 		}
 		if record.Compensates != nil {
-			attributes = append(attributes, attribute.Int("aurora.compensates", *record.Compensates))
+			attributes = append(attributes, attribute.Int("sys.compensates", *record.Compensates))
 		}
 
 		_, span := tracer.Start(rootCtx, record.Syscall.Name,
@@ -87,7 +87,7 @@ func Export(ctx context.Context, journal journaled.Journal, tracer trace.Tracer,
 		}
 
 		// Open intent: dispatched, outcome never journaled.
-		span.SetAttributes(attribute.Bool("aurora.open_intent", true))
+		span.SetAttributes(attribute.Bool("sys.open_intent", true))
 		span.SetStatus(codes.Error, "open intent: outcome never journaled")
 		span.End(trace.WithTimestamp(end))
 	}
@@ -96,11 +96,11 @@ func Export(ctx context.Context, journal journaled.Journal, tracer trace.Tracer,
 
 func annotateResult(span trace.Span, result sys.SyscallResult) {
 	if labels := result.Labels(); len(labels) > 0 {
-		span.SetAttributes(attribute.StringSlice("aurora.labels", labels))
+		span.SetAttributes(attribute.StringSlice("sys.labels", labels))
 	}
 	switch result.Status() {
 	case sys.StatusFailed:
-		span.SetAttributes(attribute.String("aurora.errno", string(result.Errno())))
+		span.SetAttributes(attribute.String("sys.errno", string(result.Errno())))
 		span.SetStatus(codes.Error, result.Message())
 	default:
 		span.SetStatus(codes.Ok, "")

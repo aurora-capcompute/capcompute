@@ -296,9 +296,14 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 	}
 
 	pid := process.Cred.PID()
-	callCtx, cancel := context.WithCancel(ctx)
+	var (
+		callCtx context.Context
+		cancel  context.CancelFunc
+	)
 	if k.resumeTimeout > 0 {
 		callCtx, cancel = context.WithTimeout(ctx, k.resumeTimeout)
+	} else {
+		callCtx, cancel = context.WithCancel(ctx)
 	}
 	handle := &ResumeHandle[K]{
 		results: make(chan ResumeResult[K], 1),

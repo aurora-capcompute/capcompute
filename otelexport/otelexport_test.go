@@ -50,7 +50,7 @@ func TestExportRendersRunAsTrace(t *testing.T) {
 			t.Fatalf("span %q is not a child of the run", span.Name())
 		}
 		for _, attr := range span.Attributes() {
-			if attr.Key == "aurora.labels" {
+			if attr.Key == "sys.labels" {
 				sawLabels = true
 			}
 		}
@@ -81,7 +81,7 @@ func TestExportMarksOpenIntent(t *testing.T) {
 	var open int
 	for _, span := range recorder.Ended() {
 		for _, attr := range span.Attributes() {
-			if attr.Key == "aurora.open_intent" && attr.Value.AsBool() {
+			if attr.Key == "sys.open_intent" && attr.Value.AsBool() {
 				open++
 				if span.Name() != "transfer.out" {
 					t.Fatalf("open intent span = %q, want transfer.out", span.Name())

@@ -108,7 +108,7 @@ compensated newest-first, each compensation itself journaled
 (intent/completion, idempotency-keyed, crash-resumable) and composable with
 approval via yield; what cannot be undone mechanically escalates to a human
 with the journal — the terminal compensator. An unwound process is terminal:
-resuming it fails with `RunUnwoundError`.
+resuming it fails with `ProcessUnwoundError`.
 
 Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` from
 their entrypoint. **This ABI is your POSIX: version it, keep it small, and treat
@@ -180,7 +180,7 @@ governance and durability claims *provable* rather than aspirational.
    the process's taint downstream (`sys.Taint`) so drivers that store
    guest-derived data persist its provenance. Chain order: `Validator` →
    `Throttle` → `FlowMonitor` → replay → `Labeler` → `Declassifier` →
-   `Messenger` → `Spawner` → drivers — encoded in `Stack.ForRun`
+   `Messenger` → `Spawner` → drivers — encoded in `Stack.ForProcess`
    (`stack.go`), so assembling a chain with a layer on the wrong side of the
    replay boundary is a construction you cannot express, not a rule you must
    remember. Reserved
