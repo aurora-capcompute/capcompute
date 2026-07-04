@@ -36,6 +36,13 @@ const (
 	// mailbox yields.
 	SyscallSend = "sys.send"
 	SyscallRecv = "sys.recv"
+	// SyscallNow and SyscallRandom are the journaled world sources: the kernel
+	// pins the guest's ambient clock and RNG for determinism, so real time and
+	// entropy are capabilities instead — produced host-side on first execution,
+	// journaled like any completion, and replayed verbatim (the Temporal
+	// workflow.Now / SideEffect pattern).
+	SyscallNow    = "sys.now"
+	SyscallRandom = "sys.random"
 )
 
 // Syscall is the guest-to-host request crossing the syscall boundary.
