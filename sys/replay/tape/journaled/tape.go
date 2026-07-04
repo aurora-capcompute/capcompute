@@ -231,18 +231,9 @@ func (t *Tape) Begin(syscall sys.Syscall) (string, error) {
 		return "", fmt.Errorf("begin: cursor %d has not consumed the journal (length %d)", t.cursor, t.journal.Length())
 	}
 
-	position := t.journal.Length()
-	prev, err := t.prevHash(position)
-	if err != nil {
-		return "", err
-	}
 	recorded := syscall.Copy()
-	if err := t.journal.Append(Record{
-		Position: position,
-		Kind:     KindIntent,
-		PrevHash: prev,
-		Syscall:  &recorded,
-	}); err != nil {
+	position, err := appendChained(t.journal, t.header, Record{Kind: KindIntent, Syscall: &recorded})
+	if err != nil {
 		return "", err
 	}
 	t.cursor++
@@ -260,18 +251,8 @@ func (t *Tape) Commit(result sys.SyscallResult) error {
 		return fmt.Errorf("cannot commit invalid result %q", result.Status())
 	}
 
-	position := t.journal.Length()
-	prev, err := t.prevHash(position)
-	if err != nil {
-		return err
-	}
 	recorded := result.Copy()
-	if err := t.journal.Append(Record{
-		Position: position,
-		Kind:     KindCompletion,
-		PrevHash: prev,
-		Result:   &recorded,
-	}); err != nil {
+	if _, err := appendChained(t.journal, t.header, Record{Kind: KindCompletion, Result: &recorded}); err != nil {
 		return err
 	}
 	t.cursor++
@@ -377,10 +358,6 @@ func (t *Tape) intentKey(position int, syscall sys.Syscall) (string, error) {
 	return intentKey(t.header, position, syscall)
 }
 
-func (t *Tape) prevHash(position int) (string, error) {
-	return prevHash(t.journal, t.header, position)
-}
-
 func intentKey(header Header, position int, syscall sys.Syscall) (string, error) {
 	return digest(struct {
 		Header   Header      `json:"header"`
@@ -398,6 +375,23 @@ func prevHash(journal Journal, header Header, position int) (string, error) {
 		return "", err
 	}
 	return digest(prev)
+}
+
+// appendChained appends one record at the journal tail, stamped with its
+// position and the chain hash of its predecessor (or of the header for the
+// first record). Every appender — execution and compensation alike — goes
+// through here, so the chain semantics cannot drift between them.
+func appendChained(journal Journal, header Header, record Record) (int, error) {
+	record.Position = journal.Length()
+	prev, err := prevHash(journal, header, record.Position)
+	if err != nil {
+		return 0, err
+	}
+	record.PrevHash = prev
+	if err := journal.Append(record); err != nil {
+		return 0, err
+	}
+	return record.Position, nil
 }
 
 func digest(v any) (string, error) {

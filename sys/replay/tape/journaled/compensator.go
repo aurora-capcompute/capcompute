@@ -121,19 +121,13 @@ func (c *Compensator) Begin(inverse sys.Syscall, compensates int) (string, error
 	if c.pending {
 		return "", fmt.Errorf("compensator: a compensation is already open")
 	}
-	position := c.journal.Length()
-	prev, err := prevHash(c.journal, c.header, position)
-	if err != nil {
-		return "", err
-	}
 	recorded := inverse.Copy()
-	if err := c.journal.Append(Record{
-		Position:    position,
+	position, err := appendChained(c.journal, c.header, Record{
 		Kind:        KindCompensationIntent,
-		PrevHash:    prev,
 		Compensates: &compensates,
 		Syscall:     &recorded,
-	}); err != nil {
+	})
+	if err != nil {
 		return "", err
 	}
 	c.pending = true
@@ -148,18 +142,8 @@ func (c *Compensator) Commit(result sys.SyscallResult) error {
 	if result.Status() != sys.StatusResult && result.Status() != sys.StatusFailed {
 		return fmt.Errorf("cannot commit invalid compensation result %q", result.Status())
 	}
-	position := c.journal.Length()
-	prev, err := prevHash(c.journal, c.header, position)
-	if err != nil {
-		return err
-	}
 	recorded := result.Copy()
-	if err := c.journal.Append(Record{
-		Position: position,
-		Kind:     KindCompensationCompletion,
-		PrevHash: prev,
-		Result:   &recorded,
-	}); err != nil {
+	if _, err := appendChained(c.journal, c.header, Record{Kind: KindCompensationCompletion, Result: &recorded}); err != nil {
 		return err
 	}
 	c.pending = false
