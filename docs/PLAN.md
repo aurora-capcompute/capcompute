@@ -382,7 +382,7 @@ upgrades follow the same story once D0.2 lands.
   (`Header.Program`, `sys.spawn`) and assembly already made. API, internals,
   and wire (`session_id`, `program`, `ProgramDigest`, `ses_` id prefix, task
   scopes, event payload fields) — a clean cut; old event logs do not fold.
-  The guest ABI names (`agent.input`/`agent.finish`/`aurora.log`) are the
+  The guest ABI names (`sys.input`/`sys.output`/`sys.log`) are the
   program SDK's contract, not scope vocabulary — unchanged.
 - **D0.2 Restore quarantine.** `restore()` must not refuse to boot because a
   historical run's manifest no longer validates against the compiled driver
