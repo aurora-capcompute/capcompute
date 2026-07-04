@@ -326,12 +326,12 @@ the milestone queue above: M1–M6 built the OS, this builds what ships it.
 **New products (to be created):**
 - `aurora-dist` — the distribution: one binary compiling the runtime with a
   chosen driver set and store implementations (absorbing `aurora-stores`'
-  role), exposing the runtime over **one HTTP+SSE API** — the single way in,
+  role), exposing the runtime over **one HTTP API** — the single way in,
   versioned `/v1` from day one. Owns the runtime-adjacent services that must
   not live in terminals: **timer firing** (durable-wait resolution — today it
-  wrongly lives in a channel bridge), the **program registry + retention
-  query** (a program digest is decommissionable when no non-terminal process
-  references it), and a **static capability ceiling** (`CreateRun` refuses
+  wrongly lives in a channel bridge), the **program directory** (re-scanned
+  into the runtime by polling so the in-memory set tracks the filesystem),
+  and a **static capability ceiling** (`CreateRun` refuses
   manifests granting beyond the deployment's configured maximum —
   `sys.Attenuate` at the door; defense in depth against a compromised policy
   layer).
@@ -369,8 +369,8 @@ sessions carry continuity as data (history, the log), never as live guest
 state. A process pins its program digest (the journal header refuses digest
 drift on resume); a hard restart may adopt a new digest. So upgrades are
 **drain-and-deprecate**: new processes bind the new program; parked
-processes drain within TaskTTL; decommission when the retention query says
-no non-terminal process references the digest, keeping exact old artifacts
+processes drain within TaskTTL; decommission once no non-terminal process
+references the digest, keeping exact old artifacts
 (content-addressed) until then. ABI bumps remain fleet-wide drain events by design. Dispatcher
 upgrades follow the same story once D0.2 lands.
 
@@ -408,11 +408,11 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
 
 ### D1+ — in order, as the new repos are born
 - **D1 `aurora-dist`**: assemble runtime + drivers + stores; the API surface
-  (port of the k8s-agent webapi, `/v1`); timer firing; program registry +
-  retention; capability ceiling. The `resolution_token` and `session_id`
+  (port of the k8s-agent webapi, `/v1`); timer firing; program directory;
+  capability ceiling. The `resolution_token` and `session_id`
   renames were the cautionary tales for why the API versions from birth.
-- **D2 `aurora-cli`** end-to-end against the API (expect the firehose
-  subscription to be the first discovered gap).
+- **D2 `aurora-cli`** end-to-end against the API — the completeness test for
+  the read/poll surface.
 - **D3 the policy layer + first real connector**, per the design above.
 
 ### D1+D2 — DONE (2026-07-03)
@@ -421,25 +421,22 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   migrated from `aurora-dispatchers-llm` into `aurora-dispatchers` under the
   `sys` vocabulary) + stores absorbed from `aurora-stores` (in-memory and
   SQLite: event log with `session_id`/`process_id` columns, leases, journal
-  store with Verify, and the tenant-memory KV). The `/v1` HTTP+SSE API adds
-  the **tenant firehose** (`GET /v1/events`: merged session streams,
-  monotonic seq, replay ring + snapshot-on-reconnect, at-least-once), and the
-  dist owns timer firing (restart-safe recovery re-arms from persisted
-  tasks), the program registry (directory scan, digest-diffed hot reload,
-  retention query) and the capability ceiling (`sys.Attenuate` at process
-  creation over statically derived grant names; open-ended MCP grants are
-  refused under a ceiling). Verified end-to-end with the real agent program
+  store with Verify, and the tenant-memory KV). The `/v1` HTTP API is a thin
+  projection of the runtime read surface, and the dist owns timer firing (a
+  ticker reconciles armed timers against runtime task state — restart-safe,
+  re-arming from persisted tasks and firing elapsed ones at boot), the program
+  directory (re-scanned into the runtime on a ticker, digest-diffed) and the
+  capability ceiling (`sys.Attenuate` at process creation over statically
+  derived grant names; open-ended MCP grants are refused under a ceiling). Verified end-to-end with the real agent program
   against a scripted OpenAI-compatible stub, including a full restart
   mid-timer-wait.
 - **D2 `aurora-cli` shipped.** Pure-stdlib terminal over the dist API with
   its own wire types and a **saved kubectl-style context** (server + current
   session + current process in `$AURORA_CONFIG`), so ids chosen once are not
   retyped; `use`/`context`/`sessions` manage it, `-s`/`-p`/`-server`
-  override. send/follow, journal/tasks/graph rendering, approve/deny by
-  `resolution_token`, firehose watch. It did its job as the completeness
-  test immediately: it caught the per-session SSE double envelope (fixed —
-  the data field carries the payload; the event name lives in the SSE event
-  field) and, via its restart end-to-end, a **verbatim-marshal law** the
+  override. send/poll, journal/tasks/graph rendering, approve/deny by
+  `resolution_token`. It did its job as the completeness test immediately,
+  surfacing — via its restart end-to-end — a **verbatim-marshal law** the
   whole stack now obeys: durable renderings of syscalls and results must not
   HTML-escape (`SetEscapeHTML(false)` end to end), or a restored process
   re-issuing its own bytes diverges against its own journal.
