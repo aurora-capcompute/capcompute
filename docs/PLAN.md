@@ -432,7 +432,10 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   against a scripted OpenAI-compatible stub, including a full restart
   mid-timer-wait.
 - **D2 `aurora-cli` shipped.** Pure-stdlib terminal over the dist API with
-  its own wire types; send/follow, journal/tasks rendering, approve/deny by
+  its own wire types and a **saved kubectl-style context** (server + current
+  session + current process in `$AURORA_CONFIG`), so ids chosen once are not
+  retyped; `use`/`context`/`sessions` manage it, `-s`/`-p`/`-server`
+  override. send/follow, journal/tasks/graph rendering, approve/deny by
   `resolution_token`, firehose watch. It did its job as the completeness
   test immediately: it caught the per-session SSE double envelope (fixed —
   the data field carries the payload; the event name lives in the SSE event
@@ -440,6 +443,16 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   whole stack now obeys: durable renderings of syscalls and results must not
   HTML-escape (`SetEscapeHTML(false)` end to end), or a restored process
   re-issuing its own bytes diverges against its own journal.
+- **Read-API doctrine (decided with D2): one read, rendered client-side.**
+  The event log is the single source of truth, so `GET /v1/sessions/{id}`
+  returns the whole session log — metadata, history, and every process with
+  its full state, delegation links, journal across all revisions (each entry
+  stamped with `position`+`revision`), and tasks. The call graph, the current
+  journal, one revision, a task list are groupings of that one payload,
+  computed in the terminal. There is no `/graph`, `/journal`, or `/tasks`
+  endpoint; a single cheap `GET /v1/processes/{id}` remains for status
+  polling. Mechanism (the fold) in the server, policy (the rendering) on the
+  client — the same microkernel split the distro/policy-layer boundary makes.
 - Newly deprecated: `aurora-dispatchers-llm` (folded into
   `aurora-dispatchers/openaillm`), `aurora-stores` (folded into
   `aurora-dist/internal/store`).
