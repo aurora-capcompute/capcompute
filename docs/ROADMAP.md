@@ -28,9 +28,9 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
 | 18 | Exactly-once effects: drivers honor idempotency keys | H | M | open — keys exist (#9); driver-side dedupe missing |
 | 19 | Reservation / TCC driver shapes (saga isolation) | M–H | M | open |
-| 20 | Approval-composable compensation (yielding inverse) | M | M | open |
-| 21 | Deterministic rollback matrix (crash-test #10) | H | M | open — sim harness exists (#14) |
-| 22 | Journaled time & randomness syscalls (`sys.now`, `sys.random`) | M | S–M | open |
+| 20 | Approval-composable compensation (yielding inverse) | M | M | **done** (inverses dispatch through the task layer; rollback parks and resumes) |
+| 21 | Deterministic rollback matrix (crash-test #10) | H | M | **done** (runtime TestRollbackCrashMatrix; found + fixed the lost-wakeup park) |
+| 22 | Journaled time & randomness syscalls (`sys.now`, `sys.random`) | M | S–M | **done** (worldDispatcher below replay; SDK now()/random()) |
 | 23 | Multi-principal grants via attenuation tokens (macaroons) | H | L | open — D3 direction |
 | 24 | Plan/execute split brain (CaMeL) | H | L | open — enforcement half done (#11) |
 

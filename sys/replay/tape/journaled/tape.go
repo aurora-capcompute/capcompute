@@ -162,6 +162,24 @@ func NewTape(journal Journal, header Header) (*Tape, error) {
 	return &Tape{journal: journal, header: header}, nil
 }
 
+// loadExecution reads the record at position and enforces the read path's one
+// law about rolled-back state: a compensation record must never replay as if
+// live (ProcessUnwoundError). Anything else must be the expected execution
+// kind, or the journal is corrupt.
+func (t *Tape) loadExecution(position int, want RecordKind, reason string) (Record, error) {
+	record, err := t.journal.Load(position)
+	if err != nil {
+		return Record{}, err
+	}
+	if record.Kind == KindCompensationIntent || record.Kind == KindCompensationCompletion {
+		return Record{}, ProcessUnwoundError{Position: position}
+	}
+	if record.Kind != want {
+		return Record{}, CorruptJournalError{Position: position, Reason: reason}
+	}
+	return record, nil
+}
+
 // Next returns a recorded outcome for syscall, ok=false when syscall is new,
 // or replay.OpenIntentError when the journal ends in this syscall's intent
 // with no completion.
@@ -170,14 +188,11 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 		return sys.SyscallResult{}, false, nil
 	}
 
-	intent, err := t.journal.Load(t.cursor)
+	intent, err := t.loadExecution(t.cursor, KindIntent, "expected an intent record")
 	if err != nil {
 		return sys.SyscallResult{}, false, err
 	}
-	if intent.Kind == KindCompensationIntent || intent.Kind == KindCompensationCompletion {
-		return sys.SyscallResult{}, false, ProcessUnwoundError{Position: t.cursor}
-	}
-	if intent.Kind != KindIntent || intent.Syscall == nil {
+	if intent.Syscall == nil {
 		return sys.SyscallResult{}, false, CorruptJournalError{Position: t.cursor, Reason: "expected an intent record"}
 	}
 	if !sameSyscall(*intent.Syscall, syscall) {
@@ -204,14 +219,11 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 		}
 	}
 
-	completion, err := t.journal.Load(t.cursor + 1)
+	completion, err := t.loadExecution(t.cursor+1, KindCompletion, "expected a completion record")
 	if err != nil {
 		return sys.SyscallResult{}, false, err
 	}
-	if completion.Kind == KindCompensationIntent || completion.Kind == KindCompensationCompletion {
-		return sys.SyscallResult{}, false, ProcessUnwoundError{Position: t.cursor + 1}
-	}
-	if completion.Kind != KindCompletion || completion.Result == nil {
+	if completion.Result == nil {
 		return sys.SyscallResult{}, false, CorruptJournalError{Position: t.cursor + 1, Reason: "expected a completion record"}
 	}
 	t.cursor += 2
