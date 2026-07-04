@@ -24,8 +24,15 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | H | M | **done** (`sim/`, full crash matrix) |
 | 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | **done** (`sched/`) |
-| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — unblocked by #9; do when volume is real |
+| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — unblocked by #9; volume is now real (full StoredProcess per transition) |
 | 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
+| 18 | Exactly-once effects: drivers honor idempotency keys | H | M | open — keys exist (#9); driver-side dedupe missing |
+| 19 | Reservation / TCC driver shapes (saga isolation) | M–H | M | open |
+| 20 | Approval-composable compensation (yielding inverse) | M | M | open |
+| 21 | Deterministic rollback matrix (crash-test #10) | H | M | open — sim harness exists (#14) |
+| 22 | Journaled time & randomness syscalls (`sys.now`, `sys.random`) | M | S–M | open |
+| 23 | Multi-principal grants via attenuation tokens (macaroons) | H | L | open — D3 direction |
+| 24 | Plan/execute split brain (CaMeL) | H | L | open — enforcement half done (#11) |
 
 ## 0. Ambient-surface lockdown
 
@@ -134,3 +141,70 @@ crash-resumable), then the scope retries after the declared delay (forking at
 its `sys.begin`) or the process stops as `compensated`. A failed compensation
 fails the process with the rollback report; capabilities stay pure access
 control (an earlier metadata-driven design was replaced by this one).
+
+## 18. Exactly-once effects: drivers honor idempotency keys
+
+#9 gave every dispatch a deterministic idempotency key `(header, position,
+call-hash)`, and the compensation/task re-drive paths already dispatch under
+it — but leaf drivers do not dedupe on it, so the crash window between intent
+and completion is still at-least-once, and a redo scope amplifies that.
+Extend the contract: an effectful driver keeps an activity-memory of keys it
+has executed (Helland, *Life beyond Distributed Transactions*, CIDR '07;
+Stripe-style idempotency keys) and returns the recorded result on a re-seen
+key. Start with the drivers that write (memory.put, internet POST when it
+arrives); reads stay keyless.
+
+## 19. Reservation / TCC driver shapes
+
+Sagas have no isolation (García-Molina & Salem '87; Richardson's
+countermeasures: semantic lock, pending state). #10's compensation is the
+*Cancel* leg; add the *Try-Confirm* leg: a driver exposes `x.reserve`
+returning a hold that the enclosing section's `sys.commit` confirms and an
+abort (or expiry) releases — Pardon & Pautasso's RESTful TCC design. The
+critical-section machinery already provides the commit/abort hooks; this
+turns dirty intermediate state into explicitly pending state.
+
+## 20. Approval-composable compensation
+
+A rollback whose inverse yields (a refund over a threshold that needs
+sign-off) currently fails the rollback. The settle loop is already
+crash-resumable and the park/resume shape exists for forward calls; wire a
+yielded inverse into a durable task, park the rollback, and resume settlement
+on resolution — the human as terminal compensator *inside* the rollback
+(WS-BPEL compensation-handler semantics), not only after it fails.
+
+## 21. Deterministic rollback matrix
+
+The strongest confidence-per-line investment available (FoundationDB's
+simulation culture; TigerBeetle's VOPR). The sim harness (#14) crash-tests
+forward replay; #10's backward path needs the same: crash at every append
+position across register → abort → settle → park → fire → refork, asserting
+exactly-once inverses, chain verification, and that a resumed settle never
+re-runs a completed compensation. Rebuild the deleted unwind matrix for the
+guest-registered semantics.
+
+## 22. Journaled time & randomness syscalls
+
+Guests must avoid wall clocks and RNGs today (the kernel pins them for
+determinism, #0). Expose them as capabilities instead: `sys.now` and
+`sys.random` journal their value like any completion and replay it verbatim —
+Temporal's `workflow.Now`/`SideEffect` pattern. Removes a whole class of
+guest landmines and enables guest-side backoff-with-jitter over the attempt
+counter the input already carries.
+
+## 23. Multi-principal grants via attenuation tokens
+
+The D3 policy layer needs per-principal grant sets. The ceiling already
+speaks `sys.Attenuate`; macaroons (Birgisson et al., NDSS '14) give
+offline-attenuable bearer grants with contextual caveats (tenant, session,
+expiry) that map one-to-one onto manifest ceilings — a multi-principal story
+with no central ACL service, philosophically native to a capability system.
+
+## 24. Plan/execute split brain
+
+The enforcement substrate for prompt-injection resilience is done: labels,
+flow policy, `sys.declassify` (#11). The missing half is brain-side — CaMeL
+(Debenedetti et al., 2025, *Defeating Prompt Injections by Design*): a
+privileged planner that never reads tool output emits a capability-checked
+plan; a quarantined executor runs it over tainted data. The kernel's
+capability + data-flow mediation is exactly the machine CaMeL assumes.
