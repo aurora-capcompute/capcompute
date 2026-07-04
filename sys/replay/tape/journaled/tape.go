@@ -166,7 +166,7 @@ func NewTape(journal Journal, header Header) (*Tape, error) {
 // law about rolled-back state: a compensation record must never replay as if
 // live (ProcessUnwoundError). Anything else must be the expected execution
 // kind, or the journal is corrupt.
-func (t *Tape) loadExecution(position int, want RecordKind, reason string) (Record, error) {
+func (t *Tape) loadExecution(position int, want Kind, reason string) (Record, error) {
 	record, err := t.journal.Load(position)
 	if err != nil {
 		return Record{}, err
