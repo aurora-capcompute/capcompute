@@ -24,15 +24,15 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | H | M | **done** (`sim/`, full crash matrix) |
 | 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | **done** (`sched/`) |
-| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | open — unblocked by #9; volume is now real (full StoredProcess per transition) |
+| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | **done** (session.snapshot + Log.Compact stream rewrite; terminal journals traded away; dist sweep loop) |
 | 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
-| 18 | Exactly-once effects: drivers honor idempotency keys | H | M | open — keys exist (#9); driver-side dedupe missing |
-| 19 | Reservation / TCC driver shapes (saga isolation) | M–H | M | open |
+| 18 | Exactly-once effects: drivers honor idempotency keys | H | M | **done** (memory driver activity memory; sqlite transactional; hold.reserve deduped) |
+| 19 | Reservation / TCC driver shapes (saga isolation) | M–H | M | **done** (core.hold reference driver: reserve/confirm/release, lazy expiry) |
 | 20 | Approval-composable compensation (yielding inverse) | M | M | **done** (inverses dispatch through the task layer; rollback parks and resumes) |
 | 21 | Deterministic rollback matrix (crash-test #10) | H | M | **done** (runtime TestRollbackCrashMatrix; found + fixed the lost-wakeup park) |
 | 22 | Journaled time & randomness syscalls (`sys.now`, `sys.random`) | M | S–M | **done** (worldDispatcher below replay; SDK now()/random()) |
 | 23 | Multi-principal grants via attenuation tokens (macaroons) | H | L | open — D3 direction |
-| 24 | Plan/execute split brain (CaMeL) | H | L | open — enforcement half done (#11) |
+| 24 | Plan/execute split brain (CaMeL) | H | L | **done** (camel-brain: quarantined planner, $N variable routing) |
 
 ## 0. Ambient-surface lockdown
 
