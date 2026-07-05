@@ -143,14 +143,19 @@ its `sys.begin`) or the process stops as `compensated`. A failed compensation
 fails the process with the rollback report; capabilities stay pure access
 control (an earlier metadata-driven design was replaced by this one).
 
-The guarantee is unconditional: a guest **failure** or a **stop** inside an
-open section is an *implicit abort*. The host authors the same `sys.abort`
-record (with a `cause` the guest cannot forge) and runs the same settle path
-before the process reports failed or stopped — so a later retry always forks
-at the section's begin over compensated state, never over an orphaned
-half-attempt whose registrations a forked revision would shadow. Only a host
-*interruption* (crash, restart) skips this: it resumes the section mid-flight
-by replay, because a restart must not touch effects.
+The rollback runs only when resuming is provably impossible — everything else
+resumes. A host interruption and a guest **failure** alike re-drive by replay
+under the *same revision*: recorded effects are served, an open intent
+re-drives under its original key, and the registrations the cut-off guest was
+about to make land in the journal — which is what makes registering an undo
+*after* its effect safe (the rollback cannot run until every registration
+reachable from the recorded history is durable). A failure whose re-drive
+appends nothing has hit a deterministic wall; only then does the *implicit
+abort* run: the host authors the same `sys.abort` record (with a `cause` the
+guest cannot forge) and settles it exactly as a guest abort, before the
+process reports failed. A **stop** rolls back immediately — the human asked
+for an end, not a resume. A retry after either forks at the section's begin,
+over compensated state, under a new revision — the only events that mint one.
 
 ## 18. Exactly-once effects: drivers honor idempotency keys
 
