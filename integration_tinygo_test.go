@@ -154,6 +154,68 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 	}
 }
 
+// An infrastructure error from the dispatcher is not an outcome: nothing was
+// journaled, so the guest must never observe it — journal-before-observe
+// covers the indeterminate case. The quantum traps and the resume fails with
+// the dispatch error; the guest's infra mode would otherwise complete and
+// report the error it saw.
+func TestTinyGoGuestNeverObservesInfrastructureErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping TinyGo integration test in short mode")
+	}
+	if _, err := exec.LookPath("tinygo"); err != nil {
+		t.Skip("tinygo not found")
+	}
+
+	ctx := context.Background()
+	wasmPath := buildTinyGoIntegrationGuest(t)
+	table := newTestProcessTable()
+	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
+		Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}},
+		PluginConfig: extism.PluginConfig{EnableWasi: true},
+		ProcessTable: table,
+	})
+	if err != nil {
+		t.Fatalf("new kernel: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := kernel.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown kernel: %v", err)
+		}
+	})
+
+	pid := integrationPID{id: "run-infra"}
+	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+		Input:      json.RawMessage(`{"mode":"infra"}`),
+		Entrypoint: "run",
+		Cred:       pid,
+		Dispatcher: integrationDispatcher{},
+	})
+	if err != nil {
+		t.Fatalf("create process: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := process.Close(context.Background()); err != nil {
+			t.Errorf("close process: %v", err)
+		}
+	})
+	if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
+		t.Fatalf("save process: %v", err)
+	}
+
+	handle, err := kernel.Resume(ctx, process)
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	result := <-handle.Results()
+	if result.Status != capcompute.ResumeFailed {
+		t.Fatalf("status = %s (output %s), want failed — the guest observed an unjournaled outcome", result.Status, result.Output)
+	}
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "unknown syscall") {
+		t.Fatalf("err = %v, want the dispatch error surfaced", result.Err)
+	}
+}
+
 func TestTinyGoGuestCanBeStopped(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping TinyGo integration test in short mode")

@@ -68,7 +68,14 @@ func dispatchSyscall[ID comparable, K PID[ID]](
 
 	result, err := process.dispatcher.Dispatch(ctx, process.Cred, wire.ToSyscall(decoded), sys.Authorization{})
 	if err != nil {
-		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, err.Error()))
+		// An infrastructure error is not an outcome: nothing was journaled, so
+		// the guest must not observe it (journal-before-observe covers the
+		// indeterminate case too). Trap the quantum — the panic surfaces as a
+		// failed resume, the intent stays open in the journal, and the re-drive
+		// resolves it under the original idempotency key. A handler-level
+		// failure (a failed SyscallResult) still flows to the guest as a
+		// recoverable observation; only the machinery's own errors trap.
+		panic(fmt.Errorf("dispatch %s: %w", decoded.Name, err))
 	}
 	return returnToGuest(plugin, wire.FromResult(result))
 }

@@ -73,6 +73,19 @@ func run() int32 {
 		pdk.SetErrorString("guest requested failure")
 		return 1
 
+	// infra dispatches a syscall whose driver errors — a machinery error, not
+	// a failed result. The host traps the quantum (the outcome was never
+	// journaled, so the guest must not observe it); control must never return
+	// here. Completing with the observed status would prove the law broken.
+	case "infra":
+		response, err := dispatch(wire.Syscall{Name: "host.missing"})
+		observation, _ := json.Marshal(fmt.Sprintf("status=%s err=%v", response.Status, err))
+		if err := pdk.OutputJSON(output{Status: "completed", Observation: observation}); err != nil {
+			pdk.SetError(err)
+			return 1
+		}
+		return 0
+
 	case "infinite":
 		for {
 		}
