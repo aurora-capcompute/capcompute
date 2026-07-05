@@ -26,13 +26,14 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | **done** (`sched/`) |
 | 16 | Journal lifecycle: snapshot + compaction + retention | M | M | **done** (session.snapshot + Log.Compact stream rewrite; terminal journals traded away; dist sweep loop) |
 | 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
-| 18 | Exactly-once effects: drivers honor idempotency keys | H | M | **done** (memory driver activity memory; sqlite transactional; hold.reserve deduped) |
-| 19 | Reservation / TCC driver shapes (saga isolation) | M–H | M | **done** (core.hold reference driver: reserve/confirm/release, lazy expiry) |
+| 18 | Exactly-once effects: drivers honor idempotency keys | H | M | **done** (memory driver activity memory; sqlite transactional) |
+| 19 | Reservation / TCC as a pattern (saga isolation) | M–H | S | **done** — resolved as a *pattern* over dispatch + compensate, not a driver (see §19) |
 | 20 | Approval-composable compensation (yielding inverse) | M | M | **done** (inverses dispatch through the task layer; rollback parks and resumes) |
-| 21 | Deterministic rollback matrix (crash-test #10) | H | M | **done** (runtime TestRollbackCrashMatrix; found + fixed the lost-wakeup park) |
+| 21 | Deterministic rollback matrix (crash-test #10) | H | M | **done** (abort + guest-failure stories at every append position; found the lost-wakeup park and the fail-redo orphaning) |
 | 22 | Journaled time & randomness syscalls (`sys.now`, `sys.random`) | M | S–M | **done** (worldDispatcher below replay; SDK now()/random()) |
 | 23 | Multi-principal grants via attenuation tokens (macaroons) | H | L | open — D3 direction |
 | 24 | Plan/execute split brain (CaMeL) | H | L | **done** (camel-brain: quarantined planner, $N variable routing) |
+| 25 | Attempt-scoped idempotency keys across rollback boundaries | M–H | M | open (see §25) |
 
 ## 0. Ambient-surface lockdown
 
@@ -142,6 +143,15 @@ its `sys.begin`) or the process stops as `compensated`. A failed compensation
 fails the process with the rollback report; capabilities stay pure access
 control (an earlier metadata-driven design was replaced by this one).
 
+The guarantee is unconditional: a guest **failure** or a **stop** inside an
+open section is an *implicit abort*. The host authors the same `sys.abort`
+record (with a `cause` the guest cannot forge) and runs the same settle path
+before the process reports failed or stopped — so a later retry always forks
+at the section's begin over compensated state, never over an orphaned
+half-attempt whose registrations a forked revision would shadow. Only a host
+*interruption* (crash, restart) skips this: it resumes the section mid-flight
+by replay, because a restart must not touch effects.
+
 ## 18. Exactly-once effects: drivers honor idempotency keys
 
 #9 gave every dispatch a deterministic idempotency key `(header, position,
@@ -154,15 +164,37 @@ Stripe-style idempotency keys) and returns the recorded result on a re-seen
 key. Start with the drivers that write (memory.put, internet POST when it
 arrives); reads stay keyless.
 
-## 19. Reservation / TCC driver shapes
+## 19. Reservation / TCC as a pattern
 
 Sagas have no isolation (García-Molina & Salem '87; Richardson's
-countermeasures: semantic lock, pending state). #10's compensation is the
-*Cancel* leg; add the *Try-Confirm* leg: a driver exposes `x.reserve`
-returning a hold that the enclosing section's `sys.commit` confirms and an
-abort (or expiry) releases — Pardon & Pautasso's RESTful TCC design. The
-critical-section machinery already provides the commit/abort hooks; this
-turns dirty intermediate state into explicitly pending state.
+countermeasures: semantic lock, pending state). The resolution: Try-Confirm/
+Cancel needs **no kernel feature and no driver** — it is a usage pattern of
+the primitives #10 already guarantees, because the pending state belongs to
+the *participant*, not the orchestrator. In Pardon & Pautasso's RESTful TCC
+the hold is a resource on the service that owns it; the coordinator only
+remembers what to confirm or cancel — which is exactly what the journal and
+`sys.compensate` already are. Aurora writes to third-party systems that every
+reader treats as the source of truth: a reservation is only real if it is
+written *there*. An orchestrator-side hold table (a `core.hold` driver
+shipped briefly, then removed) is a reservation no other booker can see, and
+an orchestrator-imposed TTL is the resource owner's policy usurped — wrong
+twice for an architecture whose processes legitimately park for hours.
+
+The pattern, inside a section:
+
+	sys.begin
+	hold  := dispatch("airline.reserve", args)          — a real write, visible to all readers
+	         compensate({"airline.release", hold.id})   — the guaranteed undo (runs on abort, failure, or stop)
+	…        payment, second leg, anything that may fail …
+	         dispatch("airline.confirm", hold.id)       — the last call before commit
+	sys.commit
+
+No `confirm(&call)`-at-commit primitive either, by the same razor:
+`compensate` earns its existence because abort/failure is a path the guest is
+not alive to handle; commit is a path where the guest is alive and in
+control, so a well-placed dispatch already does it. If the participant
+self-expires holds, the guest handles the expired errno like any other
+failure — their resource, their clock.
 
 ## 20. Approval-composable compensation
 
@@ -208,3 +240,20 @@ flow policy, `sys.declassify` (#11). The missing half is brain-side — CaMeL
 privileged planner that never reads tool output emits a capability-checked
 plan; a quarantined executor runs it over tainted data. The kernel's
 capability + data-flow mediation is exactly the machine CaMeL assumes.
+
+## 25. Attempt-scoped idempotency keys across rollback boundaries
+
+The intent key is `(header, position, call-hash)` with no revision —
+deliberate, so a crash re-drive of an open intent recomputes the same key and
+the effect stays exactly-once (#9, #18). But a **rolled-back section's retry**
+reuses positions too: if attempt 2 reproduces byte-identical args at the same
+position (a deterministic guest; an LLM guest usually diverges), the driver's
+activity memory hands back attempt 1's result — an effect that attempt 1's
+rollback already *compensated*. The retry then believes it re-executed the
+effect while the world holds the undone one. Crash re-drive (same attempt:
+key must be stable) and rollback retry (new transaction: key must be fresh)
+are different beasts wearing the same key. Candidate fix: scope the key by
+the count of aborts at or before the position (derivable from the journal, so
+still deterministic), leaving the crash-path stable while every post-rollback
+attempt gets a fresh key space. Needs care at the tape/compensator seam and a
+matrix story where the guest re-executes identically.
