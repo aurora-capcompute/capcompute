@@ -99,6 +99,28 @@ func TestAbortClosesOverOpenIntent(t *testing.T) {
 	}
 }
 
+// A crash can leave an abort's intent durable but its completion lost; the
+// re-detected failure appends a fresh abort pair after the dangling intent.
+// That double-abort tail is legal history and the chain still verifies.
+func TestAbortAfterDanglingAbortIntent(t *testing.T) {
+	journal := &fakeJournal{}
+	tape := newTestTape(t, journal)
+	record(t, tape, sys.Syscall{Abi: sys.ABIVersion, Name: "billing.charge"}, sys.Result([]byte(`{}`)))
+
+	// The crash window: intent appended, completion never made durable.
+	call := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallAbort, Args: []byte(`{"reason":"first try"}`)}
+	if _, err := tape.Begin(call); err != nil {
+		t.Fatalf("begin dangling abort: %v", err)
+	}
+
+	if err := journaled.Abort(journal, json.RawMessage(`{"reason":"second try","cause":"failure"}`)); err != nil {
+		t.Fatalf("abort after dangling abort intent: %v", err)
+	}
+	if err := journaled.Verify(journal); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+}
+
 // A journal that never executed anything has no header and nothing to abort.
 func TestAbortRequiresHeader(t *testing.T) {
 	err := journaled.Abort(&fakeJournal{}, nil)
