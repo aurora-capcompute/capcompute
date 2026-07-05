@@ -24,7 +24,7 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 13 | Reference-monitor validation (grant-set + InputSchema) | H | S | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | H | M | **done** (`sim/`, full crash matrix) |
 | 15 | Scheduler seam: priority, admission, virtual-actor activation | M | M | **done** (`sched/`) |
-| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | **done** (session.snapshot + Log.Compact stream rewrite; terminal journals traded away; dist sweep loop) |
+| 16 | Journal lifecycle: snapshot + compaction + retention | M | M | removed — built, then taken out as more machinery than the problem warrants yet; streams grow unbounded until growth is a measured problem |
 | 17 | Journal→OpenTelemetry exporter | M | S | **done** (`otelexport/`) |
 | 18 | Exactly-once effects: drivers honor idempotency keys | H | M | **done** (memory driver activity memory; sqlite transactional) |
 | 19 | Reservation / TCC as a pattern (saga isolation) | M–H | S | **done** — resolved as a *pattern* over dispatch + compensate, not a driver (see §19) |
@@ -33,7 +33,7 @@ recommended sequence; each item is deliberately small enough to land alone.
 | 22 | Journaled time & randomness syscalls (`sys.now`, `sys.random`) | M | S–M | **done** (worldDispatcher below replay; SDK now()/random()) |
 | 23 | Multi-principal grants via attenuation tokens (macaroons) | H | L | open — D3 direction |
 | 24 | Plan/execute split brain (CaMeL) | H | L | **done** (camel-brain: quarantined planner, $N variable routing) |
-| 25 | Attempt-scoped idempotency keys across rollback boundaries | M–H | M | open (see §25) |
+| 25 | Attempt-scoped idempotency keys across rollback boundaries | M–H | M | **done** (records carry the revision that wrote them; intent identity derives from the record) |
 
 ## 0. Ambient-surface lockdown
 
@@ -243,17 +243,20 @@ capability + data-flow mediation is exactly the machine CaMeL assumes.
 
 ## 25. Attempt-scoped idempotency keys across rollback boundaries
 
-The intent key is `(header, position, call-hash)` with no revision —
-deliberate, so a crash re-drive of an open intent recomputes the same key and
-the effect stays exactly-once (#9, #18). But a **rolled-back section's retry**
-reuses positions too: if attempt 2 reproduces byte-identical args at the same
-position (a deterministic guest; an LLM guest usually diverges), the driver's
-activity memory hands back attempt 1's result — an effect that attempt 1's
-rollback already *compensated*. The retry then believes it re-executed the
-effect while the world holds the undone one. Crash re-drive (same attempt:
-key must be stable) and rollback retry (new transaction: key must be fresh)
-are different beasts wearing the same key. Candidate fix: scope the key by
-the count of aborts at or before the position (derivable from the journal, so
-still deterministic), leaving the crash-path stable while every post-rollback
-attempt gets a fresh key space. Needs care at the tape/compensator seam and a
-matrix story where the guest re-executes identically.
+Crash re-drive (same attempt: the key must be stable) and rollback retry (a
+new transaction: the key must be fresh) are different beasts, and a key of
+bare `(header, position, call-hash)` dressed them the same: a retry that
+reproduced byte-identical args at the same position would *adopt* the
+rolled-back attempt's recorded effect — an effect its rollback had already
+compensated — instead of re-executing it. Resolved within the existing
+abstractions: the revision **is** the attempt identity, and the fork
+discipline already guarantees what the key needs. Each record carries the
+revision that first wrote it (stamped by the Journal at append), and intent
+identity derives from the record — `(header, revision, position, call-hash)`.
+A re-driven open intent sits in the fork's shared prefix with its origin
+revision intact, so it recomputes its original key however many resume forks
+intervene; a rolled-back section's retry re-executes live, appends fresh
+records under the new revision, and gets a fresh key space. Uniform for
+children too — their journals scope their own keys. Proven by the crash
+matrices (re-drive stability) and a recharge test (a deduping driver takes
+the retry's identical charge as a new effect, never the compensated one).

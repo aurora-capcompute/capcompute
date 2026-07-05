@@ -90,7 +90,7 @@ func (c *Compensator) Effects(from int) (effects []Effect, resume *OpenCompensat
 			}
 			compensated[*record.Compensates] = true
 			if position+1 >= length {
-				key, err := intentKey(c.header, record.Position, *record.Syscall)
+				key, err := intentKey(c.header, record)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -122,7 +122,7 @@ func (c *Compensator) Begin(inverse sys.Syscall, compensates int) (string, error
 		return "", fmt.Errorf("compensator: a compensation is already open")
 	}
 	recorded := inverse.Copy()
-	position, err := appendChained(c.journal, c.header, Record{
+	stored, err := appendChained(c.journal, c.header, Record{
 		Kind:        KindCompensationIntent,
 		Compensates: &compensates,
 		Syscall:     &recorded,
@@ -131,7 +131,7 @@ func (c *Compensator) Begin(inverse sys.Syscall, compensates int) (string, error
 		return "", err
 	}
 	c.pending = true
-	return intentKey(c.header, position, inverse)
+	return intentKey(c.header, stored)
 }
 
 // Commit appends the completion for the open compensation intent.

@@ -53,13 +53,21 @@ type Header struct {
 
 // Record is one journal entry: a fixed envelope — the store's index keys —
 // plus an opaque payload. A datum lives in the envelope or in the payload,
-// never both. Scope columns above the process (tenant, session, revision)
-// belong to the store that owns the Journal, keyed by Header.Process.
+// never both. Scope columns above the process (tenant, session) belong to the
+// store that owns the Journal, keyed by Header.Process.
 type Record struct {
 	// Envelope.
 	Position int    `json:"position"`
 	Kind     Kind   `json:"kind"`
 	PrevHash string `json:"prev_hash"`
+	// Revision is the attempt that first wrote this record, stamped by the
+	// Journal implementation at append (zero when the journal has no attempt
+	// notion). It scopes the intent identity: a record in a fork's shared
+	// prefix keeps its origin revision, so a crash re-drive recomputes the
+	// original idempotency key — while a rolled-back section's retry appends
+	// fresh records under the new revision and can never adopt the compensated
+	// attempt's recorded effects.
+	Revision uint64 `json:"revision,omitempty"`
 	// Compensates names the intent position a compensation record undoes.
 	Compensates *int `json:"compensates,omitempty"`
 
@@ -205,8 +213,10 @@ func (t *Tape) Next(syscall sys.Syscall) (sys.SyscallResult, bool, error) {
 
 	if t.cursor+1 >= t.journal.Length() {
 		// Open intent at the tail: dispatched once, outcome unknown. Hand the
-		// original intent identity back so a retry carries the same key.
-		key, err := t.intentKey(intent.Position, syscall)
+		// original intent identity back — derived from the record, origin
+		// revision included — so a retry carries the same key however many
+		// resume forks sit between then and now.
+		key, err := intentKey(t.header, intent)
 		if err != nil {
 			return sys.SyscallResult{}, false, err
 		}
@@ -244,13 +254,13 @@ func (t *Tape) Begin(syscall sys.Syscall) (string, error) {
 	}
 
 	recorded := syscall.Copy()
-	position, err := appendChained(t.journal, t.header, Record{Kind: KindIntent, Syscall: &recorded})
+	stored, err := appendChained(t.journal, t.header, Record{Kind: KindIntent, Syscall: &recorded})
 	if err != nil {
 		return "", err
 	}
 	t.cursor++
 	t.pending = true
-	return t.intentKey(position, syscall)
+	return intentKey(t.header, stored)
 }
 
 // Commit appends the completion record for the open intent — after the
@@ -371,19 +381,23 @@ func Verify(journal Journal) error {
 	return nil
 }
 
-// intentKey is the intent identity — (process, position, call-hash) — used as
-// the idempotency key handed to drivers. It is deterministic, so a
-// crash-retry of the same intent recomputes the same key.
-func (t *Tape) intentKey(position int, syscall sys.Syscall) (string, error) {
-	return intentKey(t.header, position, syscall)
-}
-
-func intentKey(header Header, position int, syscall sys.Syscall) (string, error) {
+// intentKey is the intent identity — (process, revision, position, call-hash)
+// — used as the idempotency key handed to drivers. It derives from the record
+// as written, so it is stable exactly as long as the record is: a crash
+// re-drive of an open intent (served from a fork's shared prefix, origin
+// revision intact) recomputes the original key, while a rolled-back section's
+// re-execution writes fresh records under the new revision and gets a fresh
+// key space — its effects are new effects, never the compensated attempt's.
+func intentKey(header Header, record Record) (string, error) {
+	if record.Syscall == nil {
+		return "", CorruptJournalError{Position: record.Position, Reason: "intent identity requires a syscall"}
+	}
 	return digest(struct {
 		Header   Header      `json:"header"`
+		Revision uint64      `json:"revision"`
 		Position int         `json:"position"`
 		Syscall  sys.Syscall `json:"syscall"`
-	}{header, position, syscall})
+	}{header, record.Revision, record.Position, *record.Syscall})
 }
 
 func prevHash(journal Journal, header Header, position int) (string, error) {
@@ -399,19 +413,21 @@ func prevHash(journal Journal, header Header, position int) (string, error) {
 
 // appendChained appends one record at the journal tail, stamped with its
 // position and the chain hash of its predecessor (or of the header for the
-// first record). Every appender — execution and compensation alike — goes
-// through here, so the chain semantics cannot drift between them.
-func appendChained(journal Journal, header Header, record Record) (int, error) {
+// first record), and returns the record as stored — the Journal may stamp its
+// attempt scope (Revision) on the way in. Every appender — execution and
+// compensation alike — goes through here, so the chain semantics cannot drift
+// between them.
+func appendChained(journal Journal, header Header, record Record) (Record, error) {
 	record.Position = journal.Length()
 	prev, err := prevHash(journal, header, record.Position)
 	if err != nil {
-		return 0, err
+		return Record{}, err
 	}
 	record.PrevHash = prev
 	if err := journal.Append(record); err != nil {
-		return 0, err
+		return Record{}, err
 	}
-	return record.Position, nil
+	return journal.Load(record.Position)
 }
 
 func digest(v any) (string, error) {
