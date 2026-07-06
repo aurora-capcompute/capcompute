@@ -20,12 +20,13 @@ const (
 	SyscallBegin  = "sys.begin"
 	SyscallCommit = "sys.commit"
 	// SyscallCompensate registers a deferred inverse for the open section —
-	// journaled with concrete args, executed only if the section later aborts.
-	// SyscallAbort ends the section with a rollback instead of a commit: the
-	// registered inverses run newest-first, then the section retries or the
-	// process finishes. Both are served by the runtime's lifecycle layer; the
-	// tape knows SyscallAbort because a completed abort terminally closes a
-	// journal's execution section (see journaled.Abort and journaled.Verify).
+	// journaled with concrete args, executed only if the revision is later
+	// abandoned. SyscallAbort is the guest's own abandonment: it ends the
+	// section with a rollback instead of a commit — the registered inverses
+	// run newest-first, then the section retries or the process finishes.
+	// Both are served by the runtime's lifecycle layer. The tape never
+	// interprets these names: a journal's rollback is marked by its
+	// compensation section, not by any particular call.
 	SyscallCompensate = "sys.compensate"
 	SyscallAbort      = "sys.abort"
 	// SyscallSpawn creates a child process (sync-first: the parent's quantum

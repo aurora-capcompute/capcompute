@@ -340,14 +340,6 @@ func Verify(journal Journal) error {
 		if (expect == wantIntent || expect == wantCompletion) && record.Kind == KindCompensationIntent {
 			expect = wantCompensationIntent // the execution section is over
 		}
-		// A host-authored abort (journaled.Abort) may close the execution
-		// section over an open intent: the failing dispatch never completed, so
-		// its intent stays open — indeterminate, legal history — and the
-		// terminal sys.abort pair follows it directly.
-		if expect == wantCompletion && record.Kind == KindIntent &&
-			record.Syscall != nil && record.Syscall.Name == sys.SyscallAbort {
-			expect = wantIntent
-		}
 		switch expect {
 		case wantIntent:
 			if record.Kind != KindIntent || record.Syscall == nil {

@@ -158,16 +158,23 @@ re-drives under its original key, and the registrations the cut-off guest was
 about to make land in the journal — which is what makes registering an undo
 *after* its effect safe (the rollback cannot run until every registration
 reachable from the recorded history is durable). A failure whose re-drive
-appends nothing has hit a deterministic wall; only then does the *implicit
-abort* run: the host authors the same `sys.abort` record (with a `cause` the
-guest cannot forge) and settles it exactly as a guest abort, before the
-process reports failed. A **stop** rolls back immediately — the human asked
-for an end, not a resume — and an explicit **restart** abandons the whole
-revision (top-level registrations included) before re-running from scratch.
+appends nothing has hit a deterministic wall; only then is the revision
+**abandoned**: the registered compensations run, then the process reports
+failed with its original error. A **stop** rolls back immediately — the
+human asked for an end, not a resume — and an explicit **restart** abandons
+the whole revision (top-level registrations included) before re-running from
+scratch.
+
 *Abandoning a revision* — deciding it can never run again — is the only
 source of rollback, and a settled rollback is the only license to fork: at
 the section's begin for a retry, at 0 for a restart. Forks are the only
-events that mint revisions.
+events that mint revisions. The journal stays the guest's narrative
+throughout: `sys.abort` appears on it only when the guest called it, and a
+host abandonment (failure, stop, restart) is **management state** stamped
+durably on the process — its only journal trace the compensation section it
+appends, its conclusion the fork itself. The stamp standing past a terminal
+conclusion is what licenses the retry of a zero-registration scope to fork:
+that rollback leaves no journal trace at all.
 
 ### 19. Reservation / TCC as a pattern
 
