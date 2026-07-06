@@ -452,7 +452,7 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   client — the same microkernel split the distro/policy-layer boundary makes.
 - Newly deprecated: `aurora-dispatchers-llm` (folded into
   `aurora-dispatchers/openaillm`), `aurora-stores` (folded into
-  `aurora-dist/internal/store`).
+  `aurora-dist/internal/dist/store`).
 
 ## Recommended starting point
 Everything designed for these repos is `DONE` — M1 through M6, ABI v3, the

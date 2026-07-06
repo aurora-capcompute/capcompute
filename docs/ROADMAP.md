@@ -33,7 +33,7 @@ compare) required on every `/v1` request, TLS terminated by a reverse proxy in
 front, and a loopback/cluster-internal bind by default. Task resolution keeps
 its own second factor — the per-task HMAC resolution token — unchanged. This is
 one principal, not many: per-principal grants stay parked with multi-tenancy.
-Lands in aurora-dist (`internal/api` middleware + config).
+Lands in aurora-dist (`internal/dist/api` middleware + config).
 
 ### 27. HTTP server hardening
 
@@ -41,7 +41,7 @@ Lands in aurora-dist (`internal/api` middleware + config).
 `ReadTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes`, and request
 body size limits on the POST endpoints; add `GET /healthz` for liveness (the
 process-level check a supervisor needs — deeper health is the metrics' job).
-Lands in aurora-dist (`cmd/aurora-dist`, `internal/api`).
+Lands in aurora-dist (`cmd/aurora-dist`, `internal/dist/api`).
 
 ### 28. Durability ops: backup + tested restore
 
