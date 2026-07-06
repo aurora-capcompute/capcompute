@@ -366,12 +366,13 @@ agent program from the sibling checkout).
 **Upgrade doctrine** (why program upgrades stay a non-problem here, unlike
 immortal-worker systems): the unit of replay is the bounded **process** —
 sessions carry continuity as data (history, the log), never as live guest
-state. A process pins its program digest (the journal header refuses digest
-drift on resume); a hard restart may adopt a new digest. So upgrades are
-**drain-and-deprecate**: new processes bind the new program; parked
-processes drain within TaskTTL; decommission once no non-terminal process
-references the digest, keeping exact old artifacts
-(content-addressed) until then. ABI bumps remain fleet-wide drain events by design. Dispatcher
+state. A process is immutably bound to the (name, digest) it was created
+from — the journal header refuses digest drift on replay, and the runtime
+refuses resume *and* restart under changed bytes, keeping the process a
+legitimate audit target. So upgrades are **drain-and-deprecate**: new
+processes bind the new program; parked processes drain within TaskTTL;
+decommission once no non-terminal process references the digest, keeping
+exact old artifacts (content-addressed) until then. ABI bumps remain fleet-wide drain events by design. Dispatcher
 upgrades follow the same story once D0.2 lands.
 
 ### D0 — executable now, inside the three surviving repos
