@@ -96,6 +96,12 @@ manifest files in aurora-dist.
   and task tokens, and the ceiling already speaks `sys.Attenuate`. Returns
   when a second tenant is real, as identity → policy → silo control plane, in
   that order.
+- **MCP driver** — bridging stdio MCP servers as granted syscalls
+  (`mcp.<server>.<tool>`). Dropped for now: it multiplies the external surface
+  before the first deployment needs it, and its open-ended tool lists sit
+  awkwardly under the capability ceiling. Returns with the first real
+  deployment that needs a tool only MCP provides, behind explicit per-server
+  tool lists.
 - **Additional channels** (chat sources as inbound drivers, streaming APIs) —
   one channel is the boundary; a second channel is a second boundary and comes
   with the product need, not before.

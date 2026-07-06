@@ -198,7 +198,7 @@ They come in two directions, and recognizing them as *the same category pointed
 opposite ways* keeps the architecture coherent:
 
 - **Outbound drivers = dispatchers.** Called *by* a process as an outbound syscall
-  (`process → device`): internet reads, MCP tools, k8s/Helm, `timer.set`. The
+  (`process → device`): internet reads, k8s/Helm, `sys.timer`. The
   process initiates; the driver mediates access to a machine device.
 - **Inbound drivers = sources.** Drive processes *from outside* (`human → kernel →
   process`): Telegram, Slack. The device on the other end is a **human**. A source
