@@ -25,7 +25,7 @@ type OpenCompensation struct {
 
 // Compensator appends the compensation section of a journal. It owns the
 // record mechanics (kinds, hash chain, idempotency keys); the walk order and
-// the decision of *what* to compensate live with the kernel's unwinder.
+// the decision of *what* to compensate live with the caller's unwinder.
 type Compensator struct {
 	journal Journal
 	header  Header

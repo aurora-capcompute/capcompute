@@ -131,8 +131,8 @@ func (e ChainBrokenError) Error() string {
 }
 
 // ProcessUnwoundError means execution replay reached the journal's
-// compensation section: this process was aborted and its effects compensated;
-// it cannot be resumed.
+// compensation section: this revision was rolled back and its registered
+// undos ran; it cannot be resumed.
 type ProcessUnwoundError struct {
 	Position int
 }
@@ -320,8 +320,9 @@ func Verify(journal Journal) error {
 	// Structure: an execution section of intent/completion pairs (at most one
 	// trailing open intent), optionally followed by a terminal compensation
 	// section of compensation pairs (at most one trailing open compensation
-	// intent). The abort that triggered unwinding may leave the execution
-	// section's last intent open forever — that is legal history.
+	// intent). The abandonment that triggered unwinding may leave the
+	// execution section's last intent open forever — the failing dispatch
+	// never completed — and that is legal history.
 	const (
 		wantIntent = iota
 		wantCompletion
