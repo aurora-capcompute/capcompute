@@ -6,21 +6,21 @@ import (
 )
 
 func TestAttenuateGrantsSubset(t *testing.T) {
-	parent := []Capability{{Name: "internet.read"}, {Name: "timer.set"}, {Name: "k8s.get"}}
-	requested := []Capability{{Name: "timer.set"}, {Name: "internet.read"}}
+	parent := []Capability{{Name: "internet.read"}, {Name: "sys.timer"}, {Name: "k8s.get"}}
+	requested := []Capability{{Name: "sys.timer"}, {Name: "internet.read"}}
 
 	granted, err := Attenuate(parent, requested)
 	if err != nil {
 		t.Fatalf("attenuate: %v", err)
 	}
-	if len(granted) != 2 || granted[0].Name != "timer.set" || granted[1].Name != "internet.read" {
+	if len(granted) != 2 || granted[0].Name != "sys.timer" || granted[1].Name != "internet.read" {
 		t.Fatalf("granted = %+v", granted)
 	}
 }
 
 func TestAttenuateRefusesEscalation(t *testing.T) {
-	parent := []Capability{{Name: "timer.set"}}
-	requested := []Capability{{Name: "timer.set"}, {Name: "k8s.delete"}, {Name: "internet.read"}}
+	parent := []Capability{{Name: "sys.timer"}}
+	requested := []Capability{{Name: "sys.timer"}, {Name: "k8s.delete"}, {Name: "internet.read"}}
 
 	if _, err := Attenuate(parent, requested); err == nil {
 		t.Fatal("expected attenuation violation")
@@ -30,7 +30,7 @@ func TestAttenuateRefusesEscalation(t *testing.T) {
 }
 
 func TestAttenuateEmptyRequestIsEmptyGrant(t *testing.T) {
-	granted, err := Attenuate([]Capability{{Name: "timer.set"}}, nil)
+	granted, err := Attenuate([]Capability{{Name: "sys.timer"}}, nil)
 	if err != nil {
 		t.Fatalf("attenuate: %v", err)
 	}
