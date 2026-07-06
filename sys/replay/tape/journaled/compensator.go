@@ -33,7 +33,7 @@ type Compensator struct {
 }
 
 // NewCompensator opens a journal for unwinding. The journal must already have
-// a header — only a run that executed something can be unwound.
+// a header — only a process that executed something can be unwound.
 func NewCompensator(journal Journal) (*Compensator, error) {
 	header, ok, err := journal.Header()
 	if err != nil {

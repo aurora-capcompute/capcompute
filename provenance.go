@@ -123,9 +123,9 @@ func (t *Taints[ID]) snapshot(pid ID) []string {
 
 // FlowMonitor enforces information-flow policy at the reference monitor
 // (the CaMeL architecture as a kernel primitive). The guest is opaque, so
-// flow is judged conservatively: every label a run observes taints everything
+// flow is judged conservatively: every label a process observes taints everything
 // it later emits. A syscall to a capability whose Forbid set intersects the
-// run's accumulated taint is refused with ErrnoDenied before any driver runs.
+// process's accumulated taint is refused with ErrnoDenied before any driver runs.
 //
 // It sits *above* the replay layer: replayed results flow through it, so a
 // crash-restarted host rebuilds the run's taint from the journal exactly.
