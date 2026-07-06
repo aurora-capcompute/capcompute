@@ -162,8 +162,12 @@ appends nothing has hit a deterministic wall; only then does the *implicit
 abort* run: the host authors the same `sys.abort` record (with a `cause` the
 guest cannot forge) and settles it exactly as a guest abort, before the
 process reports failed. A **stop** rolls back immediately — the human asked
-for an end, not a resume. A retry after either forks at the section's begin,
-over compensated state, under a new revision — the only events that mint one.
+for an end, not a resume — and an explicit **restart** abandons the whole
+revision (top-level registrations included) before re-running from scratch.
+*Abandoning a revision* — deciding it can never run again — is the only
+source of rollback, and a settled rollback is the only license to fork: at
+the section's begin for a retry, at 0 for a restart. Forks are the only
+events that mint revisions.
 
 ### 19. Reservation / TCC as a pattern
 
