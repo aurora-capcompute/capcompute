@@ -69,7 +69,7 @@ source configuration rather than pass it through:
    `AllowedHosts` and `AllowedPaths` with a typed error. Guests that need HTTP
    or files get them as *capabilities* through the dispatcher — that is the
    whole point of the architecture.
-3. If real time/randomness is ever needed by a brain, expose it as journaled
+3. If real time/randomness is ever needed by a program, expose it as journaled
    syscalls (`sys.clock`, `sys.random`) — Temporal's `workflow.Now` rule.
 4. Add kernel-law tests (ROADMAP #2): a grantless guest must fail to reach
    HTTP/FS; clock/RNG reads must be identical across a crash-replay.
@@ -168,7 +168,7 @@ and nearly drop-in given the HMAC construction already used.
 ## 6. Errors are prose — give failures an errno
 
 **Today.** `sys.Fail(message string)`: failures carry only a human string.
-Guests branch on status; the brain treats any failure as recoverable unless it
+Guests branch on status; the program treats any failure as recoverable unless it
 marked the call `"hard"`. Nothing machine-readable distinguishes *denied* from
 *expired* from *not-found* from *transient*.
 
@@ -191,14 +191,14 @@ alongside the ABI version field so it is one wire change.
   for callbacks: the transactional-inbox pattern, correctly done, including
   the benign race between timer and human resolver (single-resolver lease,
   loser gets `ErrConflict`).
-- **Brain ABI versioning** — artifact declares `abi`, host rejects mismatch at
+- **Program ABI versioning** — artifact declares `abi`, host rejects mismatch at
   OCI pull: exec-format checking (ELF ABI version), enforced at load time
   where it belongs. Extend into the journal per ROADMAP #1 (journals should
-  record the artifact digest they were written by — brain IDs are already
+  record the artifact digest they were written by — program IDs are already
   digest-namespaced).
 - **Copy-on-write journal revisions on retry** (`forkJournalLocked`) — this is
   checkpoint forking; the same seam ROADMAP #7's snapshots will use.
-- **The brain's actions-array protocol** — batched submissions with aggregated
+- **The program's actions-array protocol** — batched submissions with aggregated
   completions is the io_uring shape, already discovered at the protocol layer.
   The boundary is in-process, so there is no crossing cost to amortize; do
   *not* move batching into the kernel ABI (non-goals).

@@ -13,7 +13,7 @@ import (
 
 // The hand codec must interoperate with a real protobuf implementation in
 // both directions. refpb is protoc-generated from envelope.proto — the
-// reference the Rust brain's prost-style codec is also held to.
+// reference the Rust program SDK's prost-style codec is also held to.
 
 var syscallMatrix = []wire.Syscall{
 	{},
@@ -90,8 +90,8 @@ func TestResponseInterop(t *testing.T) {
 	}
 }
 
-// Golden fixtures shared verbatim with the Rust brain's codec tests
-// (brain-rs/src/wire.rs) — the cross-language pin.
+// Golden fixtures shared verbatim with the Rust program SDK's codec tests
+// (aurora-brains sdk/src/wire.rs) — the cross-language pin.
 func TestGoldenFixtures(t *testing.T) {
 	syscallGold := "0803" + "1209" + hex.EncodeToString([]byte("mail.send")) +
 		"1a0c" + hex.EncodeToString([]byte(`{"to":"ops"}`))

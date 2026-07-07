@@ -15,8 +15,8 @@ type Capability struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"`
-	// Hidden keeps a capability dispatchable but excluded from the brain's
-	// discoverable tool menu (e.g. the LLM cognition tool the brain calls by a
+	// Hidden keeps a capability dispatchable but excluded from the program's
+	// discoverable tool menu (e.g. the LLM cognition tool the program calls by a
 	// name it already knows).
 	Hidden bool `json:"hidden,omitempty"`
 	// Labels are the source classes this capability's results carry (e.g.

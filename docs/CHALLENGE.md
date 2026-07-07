@@ -72,8 +72,8 @@ explicit privileged operation**.
    the guest.
 3. **Declassification = a governed operation** — composes with `require_approval`
    (a human authorizes moving a value across a label boundary).
-4. **Dual-LLM / CFI (brain-architecture).** Trusted plan from the user prompt;
-   quarantined processing of tool outputs. This is a brain change, the deepest
+4. **Dual-LLM / CFI (program-architecture).** Trusted plan from the user prompt;
+   quarantined processing of tool outputs. This is a program change, the deepest
    part, and where the real robustness lives.
 
 This is the item most worth doing: it converts "we gate actions" into "we track
@@ -91,7 +91,7 @@ is shared across all processes (noisy neighbour).
 **Why it's a gap.** An OS is a *resource manager* **and** an extended machine
 (Tanenbaum). Aurora built the extended machine and skipped the resource manager.
 For a multi-tenant governance substrate this is a denial-of-service and fairness
-hole: one tenant's burst starves others; a buggy brain in an infinite loop is
+hole: one tenant's burst starves others; a buggy program in an infinite loop is
 only killable by someone noticing and calling `Stop`.
 
 **State of the art.** wasmtime offers two complementary mechanisms:

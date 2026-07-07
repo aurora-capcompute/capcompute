@@ -1,6 +1,6 @@
 // Package wire is the ABI v3 envelope codec: the messages of envelope.proto
 // in proto3 wire format, hand-rolled and reflection-free. Both sides of the
-// trap boundary use it — the host in host.go, the Go brain as a guest — so it
+// trap boundary use it — the host in host.go, a Go guest program — so it
 // depends on nothing (TinyGo-safe, minimal TCB). Interoperability with real
 // protobuf implementations is pinned by wire_interop_test.go against
 // protoc-generated reference code; unknown fields are skipped on decode, so

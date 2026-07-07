@@ -72,7 +72,7 @@ aurora-capcompute (counters at the seams) and aurora-dist (exposition).
 Loops are bounded (abort-retry budget, re-drive wall, scheduler quotas);
 money is not. A per-grant budget in the `openaillm` driver settings — max
 calls and/or max tokens per process — enforced in the driver, exceeded budget
-returned as a failed result with a clear errno the brain can react to (wrap
+returned as a failed result with a clear errno the program can react to (wrap
 up, abort, or ask). Lands in aurora-dispatchers (`openaillm`).
 
 ### 31. Deploy shape: single-writer posture, manifests, playbooks
@@ -138,7 +138,7 @@ manifest files in aurora-dist.
 | 20 | Approval-composable compensation (yielding inverse) | **done** (rollback parks on the inverse's task and resumes) |
 | 21 | Deterministic rollback matrix | **done** (abort + guest-failure stories at every append position) |
 | 22 | Journaled time & randomness (`sys.now`, `sys.random`) | **done** (worldDispatcher below replay) |
-| 24 | Plan/execute split brain (CaMeL) | **done** (camel-brain: quarantined planner, `$N` routing) |
+| 24 | Plan/execute program (CaMeL) | **done** (camel: quarantined planner, `$N` routing) |
 | 25 | Attempt-scoped idempotency keys across rollbacks | **done** (records carry their writing revision; keys derive from the record) |
 
 Items 7 (snapshot/checkpoint), 8 (chat sources as drivers), and 23

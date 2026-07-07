@@ -160,9 +160,9 @@ primitive). Staged so value lands before the deepest part.
   Moving a value across a label boundary is an explicit operation that composes
   with `require_approval` (a human authorizes the crossing). DIFC declassify,
   gated by the approval flow you already have.
-- **M4.4 Dual-LLM / control-flow-integrity brain** — `SPEC` then `BLOCKED(brain work)`
+- **M4.4 Dual-LLM / control-flow-integrity program** — `SPEC` then `BLOCKED(program work)`
   Trusted plan from the user prompt; quarantined processing of untrusted tool
-  outputs with no tool access. The deepest robustness layer; a brain-architecture
+  outputs with no tool access. The deepest robustness layer; a program-architecture
   change in aurora-brains, not a kernel change. Spec in `ARCHITECTURE.md`; build
   after M4.1–M4.3 prove the labelling substrate.
 
@@ -259,11 +259,11 @@ uniformity — the seccomp/strace argument; wazero has no component model, so
 WIT would force a runtime switch), migrate the *encoding* to protobuf once the
 record shape settles.
 
-- Shipped as a clean cut: `abi: 3`; host and both brains migrated together;
+- Shipped as a clean cut: `abi: 3`; host and both guests migrated together;
   a JSON envelope is refused with `bad_abi`.
 - **Deviation from the sketch, deliberate:** instead of vtprotobuf/prost
   codegen in guests, the envelope codec is hand-rolled proto3 wire format
-  (`sys/wire`, ~200 dependency-free lines; mirrored in `brain-rs/src/wire.rs`).
+  (`sys/wire`, ~200 dependency-free lines; mirrored in `aurora-brains sdk/src/wire.rs`).
   This dissolves the TinyGo gate rather than passing it — no `protoreflect`
   in any guest — and honors minimal-TCB. Interop is pinned three ways:
   both-direction round-trips against protoc-generated reference code
@@ -276,8 +276,8 @@ record shape settles.
   are separate concerns, and readable journals were the point of the
   protojson caveat; store-side proto adoption rides the (blocked) runtime
   migration if it ever pays.
-- Verified here: host round-trip + protoc interop (Go tests), Rust brain
-  `cargo test` + release build for wasm32-wasip1. The Go brain and the
+- Verified here: host round-trip + protoc interop (Go tests), Rust program
+  `cargo test` + release build for wasm32-wasip1. The Go program and the
   integration guest share the host-tested codec and typecheck for wasip1;
   their tinygo compile runs in CI (no tinygo in this container).
 
@@ -376,7 +376,7 @@ exact old artifacts (content-addressed) until then. ABI bumps remain fleet-wide 
 upgrades follow the same story once D0.2 lands.
 
 ### D0 — executable now, inside the three surviving repos
-- **D0.1 Vocabulary cut: `thread` → `session`, `brain` → `program`.**
+- **D0.1 Vocabulary cut: `thread` → `session`, the cognition unit → `program`.**
   Session is the OS-correct term for the level that groups processes and is
   what a controlling terminal attaches to; "thread" inverted the metaphor
   (OS threads live *inside* processes). Program finishes a rename the kernel

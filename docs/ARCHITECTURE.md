@@ -39,7 +39,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | Code | OS concept | Contract |
 |---|---|---|
 | `Kernel` | **Kernel** (bound to one program image) | owns the process table, wires the syscall entry, spawns processes |
-| wasm module ("brain") | **Program** (executable image) | on-disk code; many processes may run one program |
+| wasm module | **Program** (executable image) | on-disk code; many processes may run one program |
 | `Process` | **Process** | one running instance; states idle/active/terminated ≈ ready/running/terminated |
 | `PID` interface / `.PID()` | **PID** | stable, deterministic process identity (same type/method-name pattern as Go's `error`) |
 | `ProcessTable` (`LoadProcess`/`SaveProcess`) | **Process table** | the kernel's lookup boundary for live processes |
@@ -81,7 +81,7 @@ Response (proto3):  abi=1 · status=2 (result|yield|failed) · code=3 (errno)
 
 Since v3 the envelope is protobuf (`sys/wire/envelope.proto` — the interop
 source of truth). The codec is hand-rolled and reflection-free (~200
-dependency-free lines shared by the host and the Go brain; the Rust brain
+dependency-free lines shared by the host and the Go program; the Rust program
 mirrors it), which is what makes it TinyGo-safe without dragging
 `protoreflect` into guests; interop is pinned against protoc-generated
 reference code, cross-language golden fixtures, and an unknown-field-skipping
@@ -383,7 +383,7 @@ included. Name it now, because it is the fault line where the clean model meets
 software evolution.
 
 **The problem.** A process is reconstructed by replaying its journal against its
-program. But programs change. When *brain v2* meets a journal written by *brain
+program. But programs change. When *program v2* meets a journal written by *program
 v1*, replay must still produce a consistent process — and that is not free:
 
 - Invariant #2 (determinism) means the replayed syscall sequence must match what
@@ -418,10 +418,10 @@ v1*, replay must still produce a consistent process — and that is not free:
    also gives migration a clean seam.
 
 **Why it matters more than the renames.** Post-rename the system reads as
-coherent, but coherence is only *proven* when it survives change. "How does brain
+coherent, but coherence is only *proven* when it survives change. "How does program
 v2 replay a v1 journal?" is the question that tests whether this architecture stays
 coherent as it does real work. Answer it deliberately; do not let the first
-breaking brain change answer it by accident.
+breaking program change answer it by accident.
 
 ## Non-goals (resist gold-plating)
 

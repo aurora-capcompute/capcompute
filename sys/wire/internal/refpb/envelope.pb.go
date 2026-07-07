@@ -6,7 +6,7 @@
 // This file is the interop source of truth. The Go codec in this package is
 // hand-rolled and reflection-free (TinyGo-safe, zero dependencies) and is
 // verified against protoc-generated reference code in wire_interop_test.go;
-// the Rust brain implements the same messages. Schema evolution rules are
+// the Rust program SDK implements the same messages. Schema evolution rules are
 // protobuf's: never reuse a field number, add fields freely — decoders skip
 // what they do not know.
 
