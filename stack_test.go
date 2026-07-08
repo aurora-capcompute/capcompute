@@ -30,14 +30,11 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 	journal := newMemJournal()
 	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "p1"}
 	driver := &stackDriver{}
-	mailbox := newMemMailbox[string]()
 
 	// Everything the chain publishes is granted, plus the reserved syscalls.
 	grants := func(cred testPID) []sys.Capability {
 		return append([]sys.Capability(nil), append(flowCaps,
 			sys.Capability{Name: sys.SyscallDeclassify},
-			sys.Capability{Name: sys.SyscallSend},
-			sys.Capability{Name: sys.SyscallRecv},
 		)...)
 	}
 	boot := func(t *testing.T) sys.Dispatcher[testPID] {
@@ -50,11 +47,6 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 			Grants: grants,
 			Taints: NewTaints[string](), // fresh per boot: a crash loses host memory
 			Limit:  NewRateLimit(1000, 1000),
-			IPC: &IPCConfig[string, testPID]{
-				Grants:   grants,
-				Mailbox:  mailbox,
-				ParsePID: func(to string) (string, error) { return to, nil },
-			},
 		}.ForProcess(tape, driver)
 		if err != nil {
 			t.Fatalf("for run: %v", err)
@@ -80,13 +72,6 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 		t.Fatalf("journaled completion = %+v (err %v), want untrusted_web label", completion, err)
 	}
 
-	// Messenger below replay: sends carry idempotency keys and are journaled.
-	sent, err := chain.Dispatch(context.Background(), testPID{id: "p1"},
-		sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSend, Args: json.RawMessage(`{"to":"p2","payload":"hi"}`)}, sys.Authorization{})
-	if err != nil || sent.Status() != sys.StatusResult {
-		t.Fatalf("send = %#v, err %v", sent, err)
-	}
-
 	// FlowMonitor above replay: the taint denies the protected capability…
 	if result := call(t, chain, "p1", "k8s.delete"); result.Errno() != sys.ErrnoDenied {
 		t.Fatalf("tainted k8s.delete = %#v, want denied", result)
@@ -99,10 +84,6 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 	driverCalls := len(driver.keys)
 	rebooted := boot(t)
 	call(t, rebooted, "p1", "internet.read")
-	if _, err := rebooted.Dispatch(context.Background(), testPID{id: "p1"},
-		sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSend, Args: json.RawMessage(`{"to":"p2","payload":"hi"}`)}, sys.Authorization{}); err != nil {
-		t.Fatalf("replayed send: %v", err)
-	}
 	if result := call(t, rebooted, "p1", "k8s.delete"); result.Errno() != sys.ErrnoDenied {
 		t.Fatalf("post-crash k8s.delete = %#v, want denied (taint not rebuilt)", result)
 	}

@@ -11,7 +11,7 @@ import (
 // Stack wires the kernel's canonical dispatcher chain. The order is the
 // load-bearing part, so it lives in code instead of prose:
 //
-//	Validator → Throttle → FlowMonitor → [replay] → Labeler → Declassifier → Messenger → Spawner → drivers
+//	Validator → Throttle → FlowMonitor → [replay] → Labeler → Declassifier → Spawner → drivers
 //
 // Above the replay layer sit the pieces whose decisions must re-derive
 // deterministically on every pass and never enter the journal: validation and
@@ -19,12 +19,12 @@ import (
 // throttle's delays are invisible to a clockless guest. Below the replay
 // layer sit the pieces whose outcomes must be journaled exactly once and
 // served from the tape thereafter: stamped labels, approved declassification
-// crossings, message sends/receives, and spawned child results — all of which
-// also need the tape's idempotency keys. Assembling this by hand and getting
-// one layer on the wrong side silently breaks a kernel law; ForProcess cannot.
+// crossings, and spawned child results — all of which also need the tape's
+// idempotency keys. Assembling this by hand and getting one layer on the wrong
+// side silently breaks a kernel law; ForProcess cannot.
 //
 // The Stack holds the chain's cross-process components (grant source, taint
-// state, rate limit, spawn/IPC config); ForProcess completes it with the one
+// state, rate limit, spawn config); ForProcess completes it with the one
 // per-process piece — the tape — and the process's drivers.
 type Stack[ID comparable, K PID[ID]] struct {
 	// Grants is the manifest seam: the capability set granted to a cred.
@@ -41,8 +41,6 @@ type Stack[ID comparable, K PID[ID]] struct {
 	RateKeyOf func(cred K) string
 	// Spawn enables sys.spawn. Optional.
 	Spawn *SpawnConfig[K]
-	// IPC enables sys.send/sys.recv. Optional.
-	IPC *IPCConfig[ID, K]
 	// OpenIntents overrides the open-intent policy (default: retry under the
 	// original idempotency key).
 	OpenIntents replay.OpenIntentPolicy
@@ -64,9 +62,6 @@ func (s Stack[ID, K]) ForProcess(tape replay.Tape, drivers sys.Dispatcher[K]) (s
 	below := drivers
 	if s.Spawn != nil {
 		below = NewSpawner(*s.Spawn, below)
-	}
-	if s.IPC != nil {
-		below = NewMessenger(*s.IPC, below)
 	}
 	below = NewLabeler[K](NewDeclassifier[K](below))
 

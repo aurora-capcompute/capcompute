@@ -205,12 +205,13 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   DoD: sync child completes and commits to parent journal; replay does not
   re-spawn; capability escalation refused; child-yield propagates to parent and
   resumes correctly.
-- **M5.3 IPC + supervision** — `DONE` (`ipc.go`: sys.send/sys.recv through the journaled path, keyed Mailbox dedup, attenuated capability passing, empty-recv yields; `sched/supervisor.go`: one-for-one/one-for-all/rest-for-one via Scheduler.Stop + resubmit, restart intensity, escalation) (CHALLENGE I)
-  Capability-passing message send/receive, each journaled; deterministic
-  interleaving via a per-receiver ordered input log; supervision as process
-  metadata (OTP strategies: one-for-one/one-for-all/rest-for-one, max-restart-
-  intensity, orphan handling). Spec now in `ARCHITECTURE.md`; build when spawn
-  forces multiprocess.
+- **M5.3 Supervision** — `DONE` (`sched/supervisor.go`: one-for-one/one-for-all/rest-for-one via Scheduler.Stop + resubmit, restart intensity, escalation) (CHALLENGE I)
+  Supervision is process metadata (OTP strategies: one-for-one/one-for-all/
+  rest-for-one, max-restart-intensity, orphan handling); spec in
+  `ARCHITECTURE.md`. IPC (sys.send/sys.recv, a `Messenger` decorator) was
+  prototyped and then **removed** — it was never wired into the runtime stack,
+  so it was dead weight. Cross-process/-session data sharing, if it is ever
+  needed, becomes an explicit granted channel, not ambient message-passing.
 - **M5.4 Unforgeable capability references** — `DEFER` (CHALLENGE J)
   Only if guest-to-guest capability delegation (via IPC) is needed. Until then
   document the model as authorized-by-cred, not by unforgeable token.

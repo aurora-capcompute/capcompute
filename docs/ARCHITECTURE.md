@@ -56,7 +56,6 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `Validator` / `FlowMonitor`+`Taints` | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
 | `Stack` | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
 | `Spawner` / `sys.spawn` | **spawn(2)** | child processes with attenuated authority; deterministic child identity from the intent key |
-| `Messenger` / `sys.send`+`sys.recv` | **Pipes / message queues** | journaled twice, once per side: send = effect, receive = positionally-replayed input event |
 | `sched.Scheduler` | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency (the instance is cache, the journal is the process) |
 | `sched.Supervisor` | **OTP supervision** | restart = stop + resubmit; replay makes restarts lose nothing |
 | `Throttle`+`RateLimit` | **Resource limits** (aggregate) | delays, never denies — a wall-clock refusal would be guest-visible nondeterminism |
@@ -183,7 +182,7 @@ governance and durability claims *provable* rather than aspirational.
    the process's taint downstream (`sys.Taint`) so drivers that store
    guest-derived data persist its provenance. Chain order: `Validator` →
    `Throttle` → `FlowMonitor` → replay → `Labeler` → `Declassifier` →
-   `Messenger` → `Spawner` → drivers — encoded in `Stack.ForProcess`
+   `Spawner` → drivers — encoded in `Stack.ForProcess`
    (`stack.go`), so assembling a chain with a layer on the wrong side of the
    replay boundary is a construction you cannot express, not a rule you must
    remember. Reserved
@@ -288,27 +287,10 @@ wall-clock-dependent refusal would be guest-visible nondeterminism, while a
 delay is invisible to a guest with no ambient clock (law #2 shapes even the
 rate limiter).
 
-## IPC and supervision
+## Supervision
 
-Sync-first `spawn` covers composition; message passing covers concurrency.
-Implemented (PLAN M5.3):
-
-- **Messages are journaled twice, once per side** (`ipc.go`, the `Messenger`
-  decorator below the replay layer). A `sys.send` is an *effect* in the
-  sender's journal — replay never re-sends; a `sys.recv` is an *input event*
-  in the receiver's journal — replay re-reads the same message at the same
-  position, so delivery order is journal order, never wall clock (actor model
-  + event sourcing). Both sides carry idempotency keys and the app-supplied
-  durable `Mailbox` dedups on them: a crash-retried send delivers once, a
-  crash-retried receive re-reads the message it consumed. A receive on an
-  empty mailbox **yields** — the process parks until the app wakes it on
-  delivery, the same protocol as any pending external task.
-- **Capability passing rides messages.** A message may carry capability names
-  ⊆ the sender's grant set, checked by `sys.Attenuate` at send exactly like
-  spawn; how the receiver's grant table absorbs them is app policy.
-  **Unforgeable capability references (M5.4)** stay deferred: the model is
-  authorized-by-cred, documented honestly (CHALLENGE J).
-- **Supervision** (`sched/supervisor.go`): OTP strategies adapted to durable
+Sync-first `spawn` covers composition; crash-recovery of *child* processes is
+supervision (`sched/supervisor.go`): OTP strategies adapted to durable
   cooperative processes — "restart" means stop the quantum (`Scheduler.Stop`: a
   queued quantum dequeues, a running one has its context cancelled and the
   kernel kills the guest) and resubmit; replay reconstructs the child
