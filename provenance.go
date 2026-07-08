@@ -33,7 +33,7 @@ func (l *Labeler[K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, 
 	case sys.SyscallBegin, sys.SyscallCommit, sys.SyscallDeclassify:
 		return result, nil // kernel control syscalls carry no data provenance
 	}
-	labels := []string{"syscall:" + syscall.Name}
+	labels := []string{sys.SyscallLabelPrefix + syscall.Name}
 	if capability, ok := sys.FindCapability(l.next.Capabilities(), syscall.Name); ok {
 		labels = append(labels, capability.Labels...)
 	}

@@ -162,10 +162,12 @@ governance and durability claims *provable* rather than aspirational.
    cred's grant set (ungranted name → `denied`) and its args against the
    capability's declared `InputSchema` (malformed → `invalid_args`) before any
    driver sees it.
-   The monitor also enforces **information flow** (the CaMeL architecture as
-   a kernel primitive): capabilities declare the source classes their results
-   carry (`Labels`, e.g. `untrusted_web`) and the classes that may not flow
-   into their args (`Forbid`); because the guest is opaque, flow is judged
+   The monitor also tracks **information flow** (the CaMeL architecture as
+   a kernel primitive): each granted operation declares the source classes its
+   results carry (`labels`, e.g. `untrusted_web`) and the classes that may not
+   flow into it (`taints`) — inline per-operation policy the driver enforces on
+   each call, since it alone decodes which operation the call args select;
+   because the guest is opaque, flow is judged
    conservatively — every label a process observes taints everything it later
    emits. Declassification is the reserved `sys.declassify` syscall: every
    crossing names its labels and a reason, requires a human approval (there
@@ -351,11 +353,11 @@ special case, it is a driver:
 
 1. **Determinism (law #2)** forbids ambient reads of shared mutable state (a
    concurrent mutation from another session would diverge replay). So the store
-   sits **behind a journaled syscall** (`memory.get`/`memory.put`, or
+   sits **behind a journaled syscall** (`core.memory`'s `get`/`put` operations, or
    file-flavoured `fs.*`): the *read result* is committed to the journal, and
    replay re-reads the recorded value regardless of the store's current
    contents. This is identical to how the ultimate shared mutable store — the
-   internet — is already handled behind `internet.read`. Cross-session memory is
+   internet — is already handled behind `core.internet`. Cross-session memory is
    *a shared mutable device behind a driver*.
 2. **No ambient authority (law #1)** makes it a **capability**: tenant-scoped,
    attenuable per manifest (an agent sees only a subtree of the tenant's memory
@@ -373,7 +375,7 @@ lookup outside all governance; here it is a journaled, labelled, attenuated
 syscall.
 
 Concurrency: like a filesystem shared across sessions, concurrent writers need
-coordination. v1 may be last-writer-wins on `memory.put`; compare-and-set is the
+coordination. v1 may be last-writer-wins on the `put` operation; compare-and-set is the
 upgrade. (See PLAN.md "Tenant memory".)
 
 ## Coherence under growth: versioned replay
