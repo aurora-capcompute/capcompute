@@ -15,6 +15,7 @@ import (
 
 var (
 	ErrAmbientAuthority     = errors.New("image grants ambient authority")
+	ErrImageMemoryOverride  = errors.New("image overrides the kernel-owned memory cap")
 	ErrInvalidGuestOutput   = errors.New("invalid guest output")
 	ErrProcessActive        = errors.New("process is already active")
 	ErrProcessRequired      = errors.New("process is required")
@@ -172,6 +173,14 @@ func NewKernel[ID comparable, K PID[ID]](ctx context.Context, config Config[ID, 
 	}
 	if len(config.Image.AllowedPaths) > 0 {
 		return nil, errors.Join(ErrAmbientAuthority, errors.New("image sets allowed_paths; filesystem access must be a dispatched capability"))
+	}
+	// The linear-memory cap is kernel-owned (Config.MaxMemoryPages). An image
+	// that also sets memory.max_pages would silently win (the SDK applies it
+	// last), so an image trying to set its own ceiling — raising it above the
+	// kernel's cap, or claiming ownership of a limit the kernel guarantees — is
+	// refused. Other manifest memory knobs (var/http byte caps) are untouched.
+	if config.Image.Memory != nil && config.Image.Memory.MaxPages > 0 {
+		return nil, errors.Join(ErrImageMemoryOverride, errors.New("image sets memory.max_pages; the memory cap is kernel-owned via Config.MaxMemoryPages"))
 	}
 
 	kernel := &Kernel[ID, K]{

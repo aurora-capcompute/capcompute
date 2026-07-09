@@ -103,6 +103,68 @@ func TestStackEnforcesCanonicalOrder(t *testing.T) {
 	}
 }
 
+// Spawn attenuation must hold through the whole assembled chain, not only the
+// Spawner in isolation: a guest that asks a spawned child for a capability the
+// parent does not hold is denied, and the child runner is never reached. This
+// proves the Spawner is wired below the replay layer (so it has an idempotency
+// key) yet still behind the Validator.
+func TestStackEnforcesSpawnAttenuation(t *testing.T) {
+	journal := newMemJournal()
+	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "parent"}
+	driver := &stackDriver{}
+	runner := &fakeRunner{results: []ResumeResult[testPID]{{Status: ResumeCompleted, Output: json.RawMessage(`{"status":"completed"}`)}}}
+
+	// The parent holds exactly flowCaps. The Validator's grant set additionally
+	// admits sys.spawn (the chain advertises it); the Spawner then attenuates.
+	grants := func(testPID) []sys.Capability {
+		return append(append([]sys.Capability(nil), flowCaps...), sys.Capability{Name: sys.SyscallSpawn})
+	}
+	tape, err := journaled.NewTape(journal, header)
+	if err != nil {
+		t.Fatalf("new tape: %v", err)
+	}
+	chain, err := Stack[string, testPID]{
+		Grants: grants,
+		Taints: NewTaints[string](),
+		Spawn: &SpawnConfig[testPID]{
+			Grants:     func(testPID) []sys.Capability { return flowCaps },
+			DeriveCred: func(parent testPID, spawnKey, program string) testPID { return testPID{id: parent.id + "/" + program} },
+			Run:        runner.run,
+		},
+	}.ForProcess(tape, driver)
+	if err != nil {
+		t.Fatalf("for process: %v", err)
+	}
+
+	ctx := context.Background()
+	// "danger.rm" is not in flowCaps, so the parent cannot delegate it.
+	escalate := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSpawn, Args: json.RawMessage(`{"program":"child","capabilities":["danger.rm"]}`)}
+	result, err := chain.Dispatch(ctx, testPID{id: "parent"}, escalate, sys.Authorization{})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if result.Status() != sys.StatusFailed || result.Errno() != sys.ErrnoDenied {
+		t.Fatalf("escalating spawn = %#v, want failed/denied", result)
+	}
+	if len(runner.runs) != 0 {
+		t.Fatalf("escalating spawn reached the child runner: %+v", runner.runs)
+	}
+
+	// A spawn restricted to a capability the parent DOES hold is admitted and
+	// the child receives exactly that attenuated subset.
+	ok := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSpawn, Args: json.RawMessage(`{"program":"child","capabilities":["mail.send"]}`)}
+	result, err = chain.Dispatch(ctx, testPID{id: "parent"}, ok, sys.Authorization{})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if result.Status() != sys.StatusResult {
+		t.Fatalf("legal spawn = %#v, want result", result)
+	}
+	if len(runner.runs) != 1 || len(runner.runs[0].Granted) != 1 || runner.runs[0].Granted[0] != "mail.send" {
+		t.Fatalf("child granted = %+v, want exactly [mail.send]", runner.runs)
+	}
+}
+
 func TestStackRequiresItsPieces(t *testing.T) {
 	tape, _ := journaled.NewTape(newMemJournal(), journaled.Header{ABI: sys.ABIVersion, Program: "p", Process: "r"})
 	if _, err := (Stack[string, testPID]{Taints: NewTaints[string]()}).ForProcess(tape, &recordingDispatcher{}); err == nil {

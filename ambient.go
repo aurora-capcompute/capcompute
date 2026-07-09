@@ -23,24 +23,32 @@ const guestClockStepNanos int64 = 1_000_000 // 1ms per read
 // It is constructed fresh per instance and never caller-supplied: no
 // environment, no args, pinned deterministic clock and RNG.
 func guestModuleConfig() wazero.ModuleConfig {
-	var wallReads, nanoReads int64
+	clock := &deterministicClock{}
 	rand := &deterministicRand{state: 0x9E3779B97F4A7C15}
 
-	walltime := func() (int64, int32) {
-		nanos := wallReads * guestClockStepNanos
-		wallReads++
-		return guestEpochSec + nanos/1_000_000_000, int32(nanos % 1_000_000_000)
-	}
-	nanotime := func() int64 {
-		nanos := nanoReads * guestClockStepNanos
-		nanoReads++
-		return nanos
-	}
-
 	return wazero.NewModuleConfig().
-		WithWalltime(walltime, wzsys.ClockResolution(guestClockStepNanos)).
-		WithNanotime(nanotime, wzsys.ClockResolution(guestClockStepNanos)).
+		WithWalltime(clock.walltime, wzsys.ClockResolution(guestClockStepNanos)).
+		WithNanotime(clock.nanotime, wzsys.ClockResolution(guestClockStepNanos)).
 		WithRandSource(rand)
+}
+
+// deterministicClock backs the WASI clock a guest can reach. Both readings
+// advance one guestClockStepNanos per read from a fixed origin, so a fresh
+// instance (including a crash-replay) observes the identical sequence.
+type deterministicClock struct {
+	wallReads, nanoReads int64
+}
+
+func (c *deterministicClock) walltime() (int64, int32) {
+	nanos := c.wallReads * guestClockStepNanos
+	c.wallReads++
+	return guestEpochSec + nanos/1_000_000_000, int32(nanos % 1_000_000_000)
+}
+
+func (c *deterministicClock) nanotime() int64 {
+	nanos := c.nanoReads * guestClockStepNanos
+	c.nanoReads++
+	return nanos
 }
 
 // deterministicRand is a fixed-seed xorshift64* stream backing WASI
