@@ -50,12 +50,13 @@ AI agents safely:
               │  HTTP /v1
          aurora-dist                         ← the server (one binary you run)
               │  assembled from…
-   ┌──────────┼─────────────────────┐
- aurora-      aurora-dispatchers      capcompute   ◀── YOU ARE HERE
- capcompute   (capability drivers:    (the kernel)
- (orchestr.)   internet, LLM, files)
-              │
-        aurora-brains                        ← the agent "programs" (Wasm) that run inside
+   ┌──────────┴──────────┐
+ aurora-capcompute    aurora-dispatchers     ← orchestration runtime + capability drivers
+   └──────────┬──────────┘
+              │  both built on
+         capcompute                          ◀── YOU ARE HERE (the kernel)
+
+   aurora-brains  →  the agent "programs" (Wasm) that run inside
 ```
 
 - **capcompute (this repo)** — the kernel: sandboxing, syscalls, the recorded
