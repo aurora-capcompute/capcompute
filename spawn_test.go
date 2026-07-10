@@ -198,6 +198,43 @@ func TestSpawnUnderReplay(t *testing.T) {
 	}
 }
 
+// A completed child's taint must ride its spawn result so the parent's
+// FlowMonitor observes it — otherwise a parent launders a forbidden source by
+// delegating the read to a child and reading the answer back unlabeled.
+func TestSpawnStampsChildTaintOnResult(t *testing.T) {
+	runner := &fakeRunner{results: []ResumeResult[testPID]{{Status: ResumeCompleted, Output: json.RawMessage(`{"ok":true}`)}}}
+	spawner := NewSpawner(SpawnConfig[testPID]{
+		Grants:      func(testPID) []sys.Capability { return parentCaps },
+		DeriveCred:  func(parent testPID, spawnKey, program string) testPID { return testPID{id: parent.id + "/" + program} },
+		Run:         runner.run,
+		ChildLabels: func(testPID) []string { return []string{"untrusted_web"} },
+	}, &recordingDispatcher{})
+
+	ctx := sys.WithIdempotencyKey(context.Background(), "key-1")
+	result, err := spawner.Dispatch(ctx, testPID{id: "parent"}, spawnSyscall(`{"program":"child"}`), sys.Authorization{})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if labels := result.Labels(); len(labels) != 1 || labels[0] != "untrusted_web" {
+		t.Fatalf("spawn result labels = %v, want [untrusted_web] to ride the child's answer up to the parent", labels)
+	}
+}
+
+// With no ChildLabels hook the result is unlabeled — the taint-unaware default,
+// correct only when parent and child do not share flow state.
+func TestSpawnWithoutChildLabelsHookIsUnlabeled(t *testing.T) {
+	runner := &fakeRunner{results: []ResumeResult[testPID]{{Status: ResumeCompleted, Output: json.RawMessage(`{"ok":true}`)}}}
+	spawner := newSpawner(runner)
+	ctx := sys.WithIdempotencyKey(context.Background(), "key-1")
+	result, err := spawner.Dispatch(ctx, testPID{id: "parent"}, spawnSyscall(`{"program":"child"}`), sys.Authorization{})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if labels := result.Labels(); len(labels) != 0 {
+		t.Fatalf("spawn result labels = %v, want none without a ChildLabels hook", labels)
+	}
+}
+
 func TestSpawnerExposesSpawnCapability(t *testing.T) {
 	spawner := newSpawner(&fakeRunner{results: []ResumeResult[testPID]{{}}})
 	capabilities := spawner.Capabilities()

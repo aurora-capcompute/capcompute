@@ -48,6 +48,19 @@ type SpawnConfig[K any] struct {
 	DeriveCred func(parent K, spawnKey string, program string) K
 	// Run executes the child.
 	Run ChildRunner[K]
+	// ChildLabels reports a completed child's accumulated taint, stamped onto
+	// the spawn result so the parent's FlowMonitor observes exactly what the
+	// child observed — the child's reads become the parent's taint, closing the
+	// cross-spawn laundering path (a parent must not launder a forbidden source
+	// by delegating the read to a child and reading back the answer).
+	//
+	// Optional, but load-bearing whenever flow policy is in play: the Spawner is
+	// deliberately taint-unaware (taint is the FlowMonitor's shared concern, not
+	// the spawn primitive's), so a wiring that shares one Taints across parent
+	// and child MUST set this — e.g. return taints.Snapshot(child.PID()) — or a
+	// child's taint silently fails to reach the parent. nil propagates no child
+	// taint, correct only when parent and child do not share flow state.
+	ChildLabels func(child K) []string
 }
 
 // Spawner is the kernel-provided dispatcher decorator serving sys.spawn:
@@ -111,7 +124,15 @@ func (s *Spawner[K]) Dispatch(ctx context.Context, cred K, syscall sys.Syscall, 
 	}
 	switch result.Status {
 	case ResumeCompleted:
-		return sys.Result(result.Output), nil
+		// The child's answer carries the child's provenance: stamp the child's
+		// accumulated taint so the parent's FlowMonitor observes it. Without this
+		// a parent could launder a forbidden source by spawning a child to read
+		// it and reading the answer back unlabeled.
+		out := sys.Result(result.Output)
+		if s.config.ChildLabels != nil {
+			out = out.WithLabels(s.config.ChildLabels(child)...)
+		}
+		return out, nil
 	case ResumeYielded:
 		// Transitive yield: the parent blocks on the same external work the
 		// child blocks on. On resume the parent replays, re-issues this
