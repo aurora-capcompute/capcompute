@@ -109,6 +109,11 @@ func (t *Taints[ID]) intersection(pid ID, forbid []string) []string {
 	return tainted
 }
 
+// Snapshot returns the labels a process has accumulated — its current taint — so
+// a caller can carry that provenance elsewhere (e.g. onto session history a later
+// run will observe, keeping the flow policy intact across that boundary).
+func (t *Taints[ID]) Snapshot(pid ID) []string { return t.snapshot(pid) }
+
 func (t *Taints[ID]) snapshot(pid ID) []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
