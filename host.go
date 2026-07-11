@@ -43,7 +43,9 @@ func dispatchSyscall[ID comparable, K PID[ID]](
 		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, "pid missing from context"))
 	}
 	process, err := table.LoadProcess(ctx, pid)
-	if err != nil {
+	if err != nil || process == nil {
+		// A nil process with a nil error is a ProcessTable contract violation;
+		// fail closed with not_found rather than nil-deref process.dispatcher below.
 		return returnToGuest(plugin, failResponse(sys.ErrnoNotFound, "process not found"))
 	}
 	rawSyscall, err := plugin.ReadBytes(offset)

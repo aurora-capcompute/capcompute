@@ -61,7 +61,19 @@ func (s Stack[ID, K]) ForProcess(tape replay.Tape, drivers sys.Dispatcher[K]) (s
 	// Below the replay layer: journaled once, replayed thereafter.
 	below := drivers
 	if s.Spawn != nil {
-		below = NewSpawner(*s.Spawn, below)
+		spawn := *s.Spawn
+		if spawn.ChildLabels == nil {
+			// The canonical chain shares one Taints across parent and child, so a
+			// child's taint must reach the parent through the spawn result or a
+			// forbidden source is laundered by delegating the read. Default the
+			// hook to the shared taint state — the Stack's purpose is that a layer
+			// left unwired cannot silently break a kernel law, and cross-spawn flow
+			// is one. A caller that truly shares no flow state can still pass an
+			// explicit no-op.
+			taints := s.Taints
+			spawn.ChildLabels = func(child K) []string { return taints.Snapshot(child.PID()) }
+		}
+		below = NewSpawner(spawn, below)
 	}
 	below = NewLabeler[K](NewDeclassifier[K](below))
 

@@ -72,6 +72,7 @@ type Process[K any] struct {
 	Entrypoint string
 	plugin     *extism.Plugin
 	dispatcher sys.Dispatcher[K]
+	ambient    *ambientSources
 	state      processState
 }
 
@@ -278,8 +279,9 @@ func (h *ResumeHandle[K]) Stop() {
 // It does not save the process; the caller decides when it becomes visible in
 // the process table.
 func (k *Kernel[ID, K]) CreateProcess(ctx context.Context, spec ProcessSpec[ID, K]) (*Process[K], error) {
+	moduleConfig, ambient := guestModuleConfig()
 	plugin, err := k.compiled.Instance(ctx, extism.PluginInstanceConfig{
-		ModuleConfig: guestModuleConfig(),
+		ModuleConfig: moduleConfig,
 	})
 	if err != nil {
 		return nil, err
@@ -290,6 +292,7 @@ func (k *Kernel[ID, K]) CreateProcess(ctx context.Context, spec ProcessSpec[ID, 
 		Entrypoint: spec.Entrypoint,
 		plugin:     plugin,
 		dispatcher: spec.Dispatcher,
+		ambient:    ambient,
 	}, nil
 }
 
@@ -303,6 +306,12 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 	if err := process.state.start(); err != nil {
 		return nil, err
 	}
+	// A resume re-executes the entrypoint from the top on a possibly-warm
+	// instance; reset the pinned clock/RNG so the re-execution observes the same
+	// ambient sequence a cold replay would (kernel law #2). No quantum for this
+	// process runs concurrently — state.start above serializes them — so this is
+	// safe to do before launching the run.
+	process.ambient.reset()
 
 	pid := process.Cred.PID()
 	var (

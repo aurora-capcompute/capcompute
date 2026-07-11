@@ -83,6 +83,51 @@ func TestDeterministicClockRestartsIdentically(t *testing.T) {
 	}
 }
 
+// Kernel law #2 (determinism) on the WARM-resume path: after a quantum has
+// advanced the pinned sources, reset returns them to their origin, so the next
+// re-execution reads exactly the sequence a fresh (cold-replay) instance would.
+// Resume calls this before re-executing; without it a warm resume reads an
+// advanced sequence and diverges from the journal.
+func TestAmbientResetRestoresColdReplaySequence(t *testing.T) {
+	readClock := func(c *deterministicClock, n int) ([]int64, []int64) {
+		wall := make([]int64, n)
+		nano := make([]int64, n)
+		for i := 0; i < n; i++ {
+			sec, frac := c.walltime()
+			wall[i] = sec*1_000_000_000 + int64(frac)
+			nano[i] = c.nanotime()
+		}
+		return wall, nano
+	}
+	readRand := func(r *deterministicRand, n int) []byte {
+		b := make([]byte, n)
+		_, _ = r.Read(b)
+		return b
+	}
+
+	// A fresh instance's reads are the reference (what a cold replay observes).
+	_, fresh := guestModuleConfig()
+	wantWall, wantNano := readClock(fresh.clock, 8)
+	wantRand := readRand(fresh.rand, 64)
+
+	// A warm instance advanced by an earlier quantum, then reset on resume.
+	_, warm := guestModuleConfig()
+	readClock(warm.clock, 5)
+	readRand(warm.rand, 40)
+	warm.reset()
+
+	gotWall, gotNano := readClock(warm.clock, 8)
+	gotRand := readRand(warm.rand, 64)
+
+	if !slices.Equal(gotWall, wantWall) || !slices.Equal(gotNano, wantNano) {
+		t.Fatalf("clock after reset diverged from a fresh instance:\nwall %v vs %v\nnano %v vs %v",
+			gotWall, wantWall, gotNano, wantNano)
+	}
+	if !bytes.Equal(gotRand, wantRand) {
+		t.Fatal("rand after reset diverged from a fresh instance")
+	}
+}
+
 // Kernel law #2 (determinism): the ambient sources the kernel pins must
 // produce identical sequences on every fresh instance, so a crash-replay
 // observes exactly what the original run observed.

@@ -165,6 +165,55 @@ func TestStackEnforcesSpawnAttenuation(t *testing.T) {
 	}
 }
 
+// The canonical Stack defaults the ChildLabels spawn-taint hook from the shared
+// Taints, so a child's observed taint reaches the parent even when the caller
+// leaves ChildLabels unset — the cross-spawn laundering footgun is closed by
+// construction, not by convention.
+func TestStackDefaultsChildTaintPropagation(t *testing.T) {
+	journal := newMemJournal()
+	header := journaled.Header{ABI: sys.ABIVersion, Program: "sha256:test", Process: "parent"}
+	taints := NewTaints[string]()
+	runner := &fakeRunner{results: []ResumeResult[testPID]{{Status: ResumeCompleted, Output: json.RawMessage(`{"status":"completed"}`)}}}
+
+	// The child is derived to "parent/child"; stand in for its run observing a
+	// forbidden source by seeding that taint before the spawn completes.
+	taints.observe("parent/child", []string{"secret"})
+
+	grants := func(testPID) []sys.Capability {
+		return append(append([]sys.Capability(nil), flowCaps...), sys.Capability{Name: sys.SyscallSpawn})
+	}
+	tape, err := journaled.NewTape(journal, header)
+	if err != nil {
+		t.Fatalf("new tape: %v", err)
+	}
+	chain, err := Stack[string, testPID]{
+		Grants: grants,
+		Taints: taints,
+		Spawn: &SpawnConfig[testPID]{ // ChildLabels deliberately left nil
+			Grants:     func(testPID) []sys.Capability { return flowCaps },
+			DeriveCred: func(parent testPID, spawnKey, program string) testPID { return testPID{id: parent.id + "/" + program} },
+			Run:        runner.run,
+		},
+	}.ForProcess(tape, &stackDriver{})
+	if err != nil {
+		t.Fatalf("for process: %v", err)
+	}
+
+	spawn := sys.Syscall{Abi: sys.ABIVersion, Name: sys.SyscallSpawn, Args: json.RawMessage(`{"program":"child","capabilities":["mail.send"]}`)}
+	result, err := chain.Dispatch(context.Background(), testPID{id: "parent"}, spawn, sys.Authorization{})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !slices.Contains(result.Labels(), "secret") {
+		t.Fatalf("spawn result labels %v lack the child's taint (default ChildLabels not applied)", result.Labels())
+	}
+	// The parent's FlowMonitor observed the labeled result, so the parent now
+	// carries the child's taint — a subsequent forbidding sink would deny.
+	if !slices.Contains(taints.Snapshot("parent"), "secret") {
+		t.Fatal("parent taint did not gain the child's observed label")
+	}
+}
+
 func TestStackRequiresItsPieces(t *testing.T) {
 	tape, _ := journaled.NewTape(newMemJournal(), journaled.Header{ABI: sys.ABIVersion, Program: "p", Process: "r"})
 	if _, err := (Stack[string, testPID]{Taints: NewTaints[string]()}).ForProcess(tape, &recordingDispatcher{}); err == nil {
