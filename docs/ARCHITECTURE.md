@@ -59,7 +59,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sched.Scheduler` | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency (the instance is cache, the journal is the process) |
 | `sched.Supervisor` | **OTP supervision** | restart = stop + resubmit; replay makes restarts lose nothing |
 | `Throttle`+`RateLimit` | **Resource limits** (aggregate) | delays, never denies — a wall-clock refusal would be guest-visible nondeterminism |
-| `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, subtree-chrooted, provenance-labelled, versioned (CAS) shared state |
+| `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, mount-scoped (`process`/`session`/`shared:<name>` — no tenant-wide scope, cross-tenant impossible), subtree-chrooted, provenance-labelled, versioned (CAS) shared state |
 | `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | same operations as core.memory but a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
