@@ -59,7 +59,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sched.Scheduler` | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency (the instance is cache, the journal is the process) |
 | `sched.Supervisor` | **OTP supervision** | restart = stop + resubmit; replay makes restarts lose nothing |
 | `Throttle`+`RateLimit` | **Resource limits** (aggregate) | delays, never denies — a wall-clock refusal would be guest-visible nondeterminism |
-| `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, mount-scoped (`process`/`session`/`shared:<name>` — no tenant-wide scope, cross-tenant impossible), subtree-chrooted, provenance-labelled, versioned (CAS) shared state |
+| `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, mount-scoped (`process` / `session` / `shared` spaces named by a separate `space` field — no tenant-wide scope, cross-tenant impossible), provenance-labelled, versioned (CAS) shared state |
 | `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | same operations as core.memory but a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
@@ -343,11 +343,12 @@ special case, it is a driver:
    internet — is already handled behind `core.internet`. Cross-session memory is
    *a shared mutable device behind a driver*.
 2. **No ambient authority (law #1)** makes it a **capability**: tenant-scoped,
-   attenuable per manifest (an agent sees only a subtree of the tenant's memory
-   — the grant tree does directory permissions for free), and governable
-   (`require_approval` may gate writes to standing memory). Cross-*tenant*
-   sharing is forbidden by default — multi-tenant isolation outranks the
-   metaphor (no Unix world-readable equivalent).
+   attenuated per manifest to explicit mounts (an agent sees only the process,
+   session, and named shared spaces its grant opens — the mount list does
+   directory permissions for free), and governable (`require_approval` may gate
+   writes to standing memory). Cross-*tenant* sharing is forbidden by
+   construction — multi-tenant isolation outranks the metaphor (no Unix
+   world-readable equivalent).
 
 Security payoff: **memory poisoning** (planting an instruction that the agent
 "remembers" and later treats as trusted) becomes visible and policeable — a
