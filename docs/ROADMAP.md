@@ -57,8 +57,10 @@ deployment config; small verification bits in aurora-dist's store.
 
 ### 29. Operational metrics, alerts, runbook
 
-The OTel exporter ships journal traces; nobody gets paged. Add operational
-metrics beside it: terminal process counts by status *and cause*, executed and
+Nothing is exported today (the journal→OTel exporter was removed unconsumed);
+nobody gets paged. Build the operational surface in aurora-dist — journal
+traces if wanted, and the metrics that page: terminal process counts by
+status *and cause*, executed and
 failed compensations (a failed rollback is undefined external state — page),
 re-drive wall hits, pending-task age, timer reconcile lag, DB size, LLM call
 latency/errors. Alert set on: failed compensation, task nearing expiry
@@ -115,6 +117,11 @@ manifest files in aurora-dist.
 
 ## Ledger — the OS model, built
 
+> File references below predate the 2026-07-19 charter passes: the monitor,
+> replay, journal, scheduler, and DST harness now live in aurora-capcompute
+> (`monitor/`, `replay/`, `journaled/`, `internal/sched/`, `sim/`). The kernel
+> library keeps the process/kernel core, `sys`, and the wire codec.
+
 | # | Item | Status |
 |---|------|--------|
 | 0 | Ambient-surface lockdown (kernel owns guest WASI sources) | **done** (`ambient.go`, `ErrAmbientAuthority`) |
@@ -122,17 +129,17 @@ manifest files in aurora-dist.
 | 2 | Kernel-law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the rollback matrices and runtime tests cover the rest in practice |
 | 3 | Hash-chained journal (tamper-evident audit) | **done** (`prev_hash`, `journaled.Verify`) |
 | 4 | Capability attenuation helper in `sys` | **done** (`sys.Attenuate`) |
-| 5 | `process.spawn` syscall (sync-first child processes) | **done** (`sys.spawn`, `spawn.go`) |
+| 5 | `process.spawn` syscall (sync-first child processes) | **done** — served by the runtime's spawn router; the kernel's parallel `Spawner` decorator was removed unconsumed |
 | 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape, idempotency keys) |
 | 10 | Guest-registered compensation + abort-retry | **done** (see §10 below — the full rollback semantics) |
 | 11 | Information-flow labels + provenance (CaMeL-style) | **done** (labels, flow policy, `sys.declassify`) |
-| 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`; `sched.Quota`) |
+| 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`); quotas live in the runtime's scheduler; the `Throttle` limiter was removed unconsumed |
 | 13 | Reference-monitor validation (grant-set + InputSchema) | **done** (`Validator`, `validate.go`) |
-| 14 | Deterministic simulation testing harness | **done** (`sim/`, crash matrices) |
-| 15 | Scheduler: priority, admission, virtual-actor activation | **done** (`sched/`) |
+| 14 | Deterministic simulation testing harness | **done** (`sim/`, crash matrices — all `_test.go`) |
+| 15 | Scheduler: priority, admission, virtual-actor activation | **done** — moved to the runtime (`internal/sched`); the supervisor was removed unconsumed |
 | 16 | Journal lifecycle: snapshot + compaction + retention | removed — built, then taken out as premature; see *Out of scope* |
-| 17 | Journal→OpenTelemetry exporter | **done** (`otelexport/`) |
+| 17 | Journal→OpenTelemetry exporter | built, then **removed** unconsumed; returns as dist ops (#29) |
 | 18 | Exactly-once effects: drivers honor idempotency keys | **done** (memory driver activity memory) |
 | 19 | Reservation / TCC as a pattern | **done** — a pattern over dispatch + compensate, not a driver (see §19) |
 | 20 | Approval-composable compensation (yielding inverse) | **done** (rollback parks on the inverse's task and resumes) |

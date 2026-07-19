@@ -7,6 +7,11 @@ that were never written down (the `cred` rename, the spawn decorator spec).
 
 Read the other docs for *why*; this doc is *what, in what order, and done-when*.
 
+> File references in the milestones below predate the 2026-07-19 charter
+> passes: the monitor (validate/provenance/stack), replay, journal, scheduler,
+> and DST harness now live in aurora-capcompute (`monitor/`, `replay/`,
+> `journaled/`, `internal/sched/`, `sim/`).
+
 ## Status legend
 `DONE` shipped · `NEXT` cleared to start · `BLOCKED(x)` waits on x ·
 `SPEC` design-only until a dependency forces it · `DEFER` intentionally not now.
@@ -75,10 +80,11 @@ steps now; aggregate quotas ride the M5 scheduler seam.
   DoD: a guest allocating past the cap traps as `ResumeFailed`; a guest past the
   deadline returns `ResumeStopped`; defaults are unlimited (opt-in).
 - **M2.2 Aggregate per-cred accounting** — `DONE` (`sched.Quota` per-owner
-  concurrency caps as backpressure in the scheduler; `capcompute.Throttle`
-  token-bucket syscall rate limiting that delays, never denies — a wall-clock
-  refusal would break guest determinism. Aggregate bytes = per-owner
-  residency × `MaxMemoryPages`.)
+  concurrency caps as backpressure in the scheduler — now in
+  `aurora-capcompute/internal/sched`. `capcompute.Throttle` token-bucket rate
+  limiting was built on the delays-never-denies law — a wall-clock refusal
+  would break guest determinism — then removed unconsumed. Aggregate bytes =
+  per-owner residency × `MaxMemoryPages`.)
 - **M2.3 Deterministic CPU fuel** — `DEFER` (frontier)
   True instruction-budget metering would make CPU part of journaled state, but
   wazero has no fuel; needs a shim or wasmtime. Revisit only if repro CPU limits
@@ -182,16 +188,25 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   Note: false-friend fix — "guestData" reads as guest-owned; it is host-side
   credentials.
 - **M5.1 Scheduler seam** — `DONE` (`sched` package: Activate/Resume/Deactivate
-  seams with `KernelResume` binding; default fair-share scheduler — strict
+  seams; default fair-share scheduler — strict
   priority bands, owner round-robin, per-owner quotas, virtual-actor residency
-  with LRU eviction and reactivation-by-replay; race-tested). The out-of-scope
-  runtime adopts it by supplying `Activate` (its replay wiring) at migration.
+  with LRU eviction and reactivation-by-replay; race-tested). The runtime
+  adopted it, and the package then **moved to its consumer**
+  (`aurora-capcompute/internal/sched`) — scheduling is runtime policy, not a
+  kernel primitive (the charter); the unused `KernelResume` binding was
+  dropped in the move.
   Widen the app-owned scheduler into an interface with priority + admission
   hooks + virtual-actor activation/deactivation (bound resident memory; Orleans/
   Golem suspend-to-zero). Also the home for M2.2 aggregate quotas. Needed by
   spawn (children must be scheduled).
   DoD: a default fair-share scheduler; idle processes evict and reactivate.
-- **M5.2 `sys.spawn` decorator (sync-first)** — `DONE` (`spawn.go`; child cred derives from the spawn's idempotency key — stronger than the sketched spawn_seq — and child execution goes through the `ChildRunner` seam, `KernelChildRunner` kernel-backed) (ROADMAP #5)
+- **M5.2 `sys.spawn` decorator (sync-first)** — `DONE`, then **removed
+  unconsumed** (the IPC razor): built as `spawn.go` — attenuation,
+  idempotency-key child identity (stronger than the sketched spawn_seq),
+  transitive yield, the `ChildRunner` seam — but the runtime serves
+  `sys.spawn` with its own router (manifest-carrying grants), so the kernel
+  decorator had no caller. The name stays reserved; the decorator returns by
+  revert only if kernel-composed children are ever needed. (ROADMAP #5)
   Kernel-provided decorator intercepting reserved `sys.SyscallSpawn`; delegates
   else. `spawn(program, input, capabilities)` with: capabilities enforced ⊑
   parent via `sys.Attenuate`; deterministic child PID `f(parentPID, spawnSeq,
@@ -206,7 +221,11 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   DoD: sync child completes and commits to parent journal; replay does not
   re-spawn; capability escalation refused; child-yield propagates to parent and
   resumes correctly.
-- **M5.3 Supervision** — `DONE` (`sched/supervisor.go`: one-for-one/one-for-all/rest-for-one via Scheduler.Stop + resubmit, restart intensity, escalation) (CHALLENGE I)
+- **M5.3 Supervision** — `DONE`, then **removed unconsumed** (built as
+  `sched/supervisor.go`: one-for-one/one-for-all/rest-for-one via
+  Scheduler.Stop + resubmit, restart intensity, escalation; razored with the
+  spawn decorator — the runtime owns child lifecycle through its delegation
+  tasks) (CHALLENGE I)
   Supervision is process metadata (OTP strategies: one-for-one/one-for-all/
   rest-for-one, max-restart-intensity, orphan handling); spec in
   `ARCHITECTURE.md`. IPC (sys.send/sys.recv, a `Messenger` decorator) was
@@ -290,8 +309,10 @@ record shape settles.
   volume; verifiable archived segments via the hash-chain.
 - **Hash-chained journal** — `DONE` with M3.1 (ROADMAP #3): `prev_hash` per record,
   `journaled.Verify` walks structure + chain.
-- **Journal → OpenTelemetry** — `DONE` (`otelexport/`) (CHALLENGE H, ROADMAP #17):
-  run=trace root, intent=span, completion folds in, open intent=error span.
+- **Journal → OpenTelemetry** — built (`otelexport/`), then **removed
+  unconsumed** (CHALLENGE H, ROADMAP #17); the mapping (run=trace root,
+  intent=span, completion folds in, open intent=error span) returns as
+  aurora-dist ops (ROADMAP #29).
 - **Kernel-law tests (laws 3–5)** — law 3 `DONE` (the `sim/` crash matrix asserts
   journal-before-execute/observe); law 4's approval-gate assertion still lives
   with the runtime's approval machinery (out of scope here).
@@ -461,17 +482,18 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
 
 ## Recommended starting point
 Everything designed for these repos is `DONE` — M1 through M6, ABI v3, the
-scheduler, quotas, supervision, the runtime migration, and the
-distribution epoch through D2: the vocabulary cuts (D0.1–D0.4), the
-`aurora-dist` distribution, and the `aurora-cli` terminal. Next up is
-**production hardening, not D3**: the 2026-07-05 refocus (ROADMAP "Now",
-items #26–31 — channel auth, server hardening, backup/restore, metrics, LLM
-spend, deploy shape) comes first, and D3's substance (policy layer,
-connectors) is parked with multi-tenancy and additional channels behind their
-return triggers. Standing
+runtime migration, and the distribution epoch through D2: the vocabulary cuts
+(D0.1–D0.4), the `aurora-dist` distribution, and the `aurora-cli` terminal.
+A 2026-07-19 charter pass then made the kernel library kernel-only: the
+scheduler moved to its consumer, and the unconsumed spawn decorator,
+supervisor, throttle, and OTel exporter were razored (designs kept above).
+Next up is **production hardening, not D3**: the 2026-07-05 refocus (ROADMAP
+"Now", items #26–31 — channel auth, server hardening, backup/restore,
+metrics, LLM spend, deploy shape) comes first, and D3's substance (policy
+layer, connectors) is parked with multi-tenancy and additional channels
+behind their return triggers. Standing
 deferrals, unchanged: **M2.3** CPU fuel waits on a wazero fuel mechanism;
 **M5.4** unforgeable capability references wait on evidence that
 authorized-by-cred is insufficient; **journal lifecycle** waits on real
-volume; the kernel **spawn seam** is wired but not yet consumed by the
-runtime (folding delegation onto `sys.spawn` is a candidate now that
-aurora-dist exists).
+volume; the kernel-side `Spawner` returns by revert only if kernel-composed
+children are ever needed (`sys.spawn` itself is live in the runtime's router).

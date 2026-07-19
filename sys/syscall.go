@@ -30,10 +30,10 @@ const (
 	SyscallCompensate = "sys.compensate"
 	SyscallAbort      = "sys.abort"
 	// SyscallSpawn creates a child process (sync-first: the parent's quantum
-	// runs the child; a yielding child yields the parent transitively). It is
-	// served by whichever spawner the assembly composes: the kernel's Spawner
-	// decorator for kernel children, or the runtime's spawn router, whose
-	// grant carries the manifests of the only programs the process may spawn.
+	// runs the child; a yielding child yields the parent transitively). The
+	// kernel reserves the name but ships no spawner; it is served above — the
+	// runtime's spawn router, whose grant carries the manifests of the only
+	// programs the process may spawn.
 	SyscallSpawn = "sys.spawn"
 	// SyscallTimer schedules a relative timer. The runtime's timer layer
 	// serves it below the task layer: a valid call yields a durable task the

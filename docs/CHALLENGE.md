@@ -21,13 +21,13 @@ where the research exists only as papers. Each is labelled.
 |---|---------|------|----------|-----------|-------------|
 | A | No information-flow control / data provenance (prompt-injection frontier) | gap | **critical** | ★★★ | **done** — labels, flow policy, `sys.declassify`, camel program |
 | B | No resource management (CPU/memory/quota metering) — the missing OS half | gap | **high** | ★★ | **done**; CPU fuel deferred (wazero has no fuel) |
-| C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ | **done** (`validate.go`) |
-| D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ | **done** (`sim/`) |
+| C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ | **done** — the runtime's `monitor` package |
+| D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ | **done** (`sim/`, in aurora-capcompute) |
 | E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope, protobuf as ABI v3 | ADR (decided) | — | ★ | **shipped** — ABI v3, `sys/wire` |
-| F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** (`sched/`) |
+| F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** — lives in the runtime (`internal/sched`) |
 | G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ | built, then **removed** as premature; returns on the growth gauge |
-| H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ | **done** (`otelexport/`) |
-| I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ | spawn + supervision **done**; IPC **removed** |
+| H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ | built, then **removed** unconsumed; returns as dist ops |
+| I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ | built, then all **removed** unconsumed; `sys.spawn` reserved |
 | J | Capabilities are authorized-by-name, not unforgeable references | classification | low | ★ | documented; **deferred** |
 | K | Journal record is an unprincipled column/payload hybrid (schema drift) | gap | medium | ★★ | **done** (M3.1 envelope+payload) |
 
@@ -309,10 +309,13 @@ process metadata (restart strategy, crash propagation, orphan handling). Fold
 into the spawn design in `ARCHITECTURE.md`; no separate roadmap number until
 spawn forces it.
 
-**Outcome — the plan was half overturned.** Spawn and supervision shipped
-(`spawn.go`, `sched/supervisor.go`). IPC went the other way: `sys.send`/
-`sys.recv` was prototyped and then removed — never wired into the runtime
-stack, dead weight. Cross-process data sharing is an explicit granted channel
+**Outcome — the whole cluster met the razor.** IPC (`sys.send`/`sys.recv`)
+was prototyped and removed first — never wired, dead weight. Spawn and
+supervision shipped (`spawn.go`, `sched/supervisor.go`), then followed in the
+2026-07-19 charter pass: the runtime serves `sys.spawn` with its own router,
+so the kernel's parallel decorator (and the supervisor beside it) had no
+caller and were removed unconsumed — the name stays reserved and the design
+stands in `ARCHITECTURE.md`. Cross-process data sharing is an explicit granted channel
 (`core.memory`), not ambient message passing; finding J's revisit trigger
 (capability delegation over IPC) recedes with it.
 

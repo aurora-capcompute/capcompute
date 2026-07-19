@@ -1,7 +1,13 @@
 ## What this is
 
-capcompute is a **library operating system** — OS abstractions provided as a Go
-library linked into a host application, not a standalone kernel on hardware. It is:
+This document describes the OS model of the Aurora core: **capcompute** (the
+kernel — a processor that runs wasm programs deterministically behind one
+syscall gate) and the layers **aurora-capcompute** builds on it (`monitor/`,
+`replay/`, `journaled/` — the reference monitor, replay, and journal; moved
+there by the 2026-07-19 charter passes: the kernel library is
+kernel-primitives-only). Together they form a **library operating system** —
+OS abstractions provided as Go libraries linked into a host application, not
+a standalone kernel on hardware. The system is:
 
 - **capability-based** — guests have *zero ambient authority*; they can only invoke
   explicitly granted capabilities (lineage: seL4, KeyKOS);
@@ -37,13 +43,10 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult`; lists `Capabilities()` |
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
-| `journaled.Record` (intent/completion, hash-chained) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
-| `Validator` / `FlowMonitor`+`Taints` | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
-| `Stack` | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
-| `Spawner` / `sys.spawn` | **spawn(2)** | child processes with attenuated authority; deterministic child identity from the intent key |
-| `sched.Scheduler` | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency (the instance is cache, the journal is the process) |
-| `sched.Supervisor` | **OTP supervision** | restart = stop + resubmit; replay makes restarts lose nothing |
-| `Throttle`+`RateLimit` | **Resource limits** (aggregate) | delays, never denies — a wall-clock refusal would be guest-visible nondeterminism |
+| `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
+| `Validator` / `FlowMonitor`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
+| `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
+| `sched.Scheduler` (aurora-capcompute) | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency — scheduling is runtime policy, so it lives above the kernel |
 | `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, mount-scoped (`process` / `session` / `shared` spaces named by a separate `space` field — no tenant-wide scope, cross-tenant impossible), provenance-labelled, versioned (CAS) shared state |
 | `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | same operations as core.memory but a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
 
@@ -136,7 +139,7 @@ governance and durability claims *provable* rather than aspirational.
    re-triable, blocking syscall whose intent stays open while the external
    task is pending.)
    *Enforced in code:* the intent/completion tape
-   (`sys/replay/tape/journaled`); an open intent met on replay is retried
+   (the runtime's `journaled` package); an open intent met on replay is retried
    under its original idempotency key or surfaced as `IndeterminateError`,
    per `OpenIntentPolicy`; records are hash-chained (`prev_hash`,
    `journaled.Verify`) so the journal is tamper-evident.
@@ -158,17 +161,16 @@ governance and durability claims *provable* rather than aspirational.
    is no unapproved path — an unattended declassify would just be flow-policy
    bypass), and is journaled, so replay re-applies the crossing without
    asking again.
-   *Enforced in code:* the `Validator` decorator (`validate.go`) at the front
-   of the dispatcher chain, plus the provenance set (`provenance.go`) —
+   *Enforced in code:* the runtime's `monitor` package — the `Validator`
+   decorator at the front of the dispatcher chain, plus the provenance set —
    `Labeler` and `Declassifier` below the replay layer (so labels and
    approved crossings are journaled) and `FlowMonitor` above it (so a
    crash-restarted host rebuilds taint exactly from replayed results, and
    replayed declassifications lift labels in order). The monitor also hands
    the process's taint downstream (`sys.Taint`) so drivers that store
    guest-derived data persist its provenance. Chain order: `Validator` →
-   `Throttle` → `FlowMonitor` → replay → `Labeler` → `Declassifier` →
-   `Spawner` → drivers — encoded in `Stack.ForProcess`
-   (`stack.go`), so assembling a chain with a layer on the wrong side of the
+   `FlowMonitor` → replay → `Labeler` → `Declassifier` →
+   drivers — encoded in `monitor.Stack.ForProcess`, so assembling a chain with a layer on the wrong side of the
    replay boundary is a construction you cannot express, not a rule you must
    remember. Reserved
    markers (`sys.begin`/`sys.commit`) are exempt because they are kernel
@@ -208,7 +210,7 @@ Consequences of the symmetry, used as design rules:
   crashes), sessions survive restart. Model it as a persistent terminal server
   (getty + tmux that survives reboot), consistent with orthogonal persistence.
 
-## Processes and `spawn` (planned syscall)
+## Processes and `spawn` (reserved syscall)
 
 Agents creating agents is the **`spawn` syscall**. Design decisions, with prior art:
 
@@ -234,57 +236,26 @@ Agents creating agents is the **`spawn` syscall**. Design decisions, with prior 
   cascade-kill vs orphan-adopt on parent `Stop`. Study Erlang/OTP supervision trees
   before this grows.
 
-**Implemented** (`spawn.go`): the `Spawner` decorator serves the reserved
-`sys.spawn` syscall *below* the parent's replay layer, so a completed spawn is
-journaled like any syscall — replay serves the child's result without
-re-spawning. Requested capability names are resolved against the parent's
-grant set and pass `sys.Attenuate` (escalation → `denied`). The child cred is
-derived from the spawn's **idempotency key** — the intent identity
-`(process, position, call-hash)` — which is strictly stronger than the sketched
-`spawn_seq` counter: it is stable across crash-retries *and* re-entries, so a
-yielded child (transitive yield: child yields → parent's spawn yields) is
-re-found by deriving the same child and replaying its own journal. Child
-execution goes through the `ChildRunner` seam; `KernelChildRunner` is the
-kernel-backed implementation (create → register in the process table → resume
-→ close; the journal is the durable child, the instance is per-quantum). A
-stopped child returns a host error so the spawn intent stays open —
-outcome unknown, resolved on replay. Sync-first needs no scheduler: the child
-borrows the parent's quantum by construction.
+**Status:** `sys.spawn` is live, served **above the kernel** by the runtime's
+spawn router (its grant carries the manifests of the only programs the
+process may spawn — richer than name-list attenuation). A kernel-side
+`Spawner` decorator implementing the design here was built in parallel
+(attenuation via `sys.Attenuate`, child cred derived from the spawn's
+idempotency key — strictly stronger than the sketched `spawn_seq`; transitive
+yield; a stopped child keeps the intent open), and **removed unconsumed** —
+the runtime's router is the spawner, so the kernel one had no caller. The
+name stays reserved; the decorator returns by revert only if kernel-composed
+children are ever needed.
 
-## Scheduling: the seam and the default
+## Scheduling: above the kernel
 
-The `sched` package splits the concern three ways: the scheduler decides
-*when* a process gets the CPU, the app decides *what* runs (`Activate` — for
-a durable process, journal replay), and the kernel decides *how* (`Resume`). The
-default is a fair-share scheduler: strict priority bands (High/Normal/Low),
-round-robin across *owners* (the aggregation key named at `Submit`, typically
-the tenant) inside a band, and per-owner concurrency quotas — the aggregate
-half of resource control — enforced as **backpressure, never rejection**
-(excess work waits; nothing fails because a neighbor is busy). Residency is
-virtual-actor shaped (Orleans/Golem): a process activates on demand, a
-yielded process stays warm, the least-recently-used idle process deactivates
-when residency exceeds its bound, and a terminated one deactivates
-immediately — the journal is the durable process, the instance is cache.
-
-The syscalls-per-second half is the `Throttle` dispatcher decorator: a
-per-key token bucket that only ever *delays*, never denies — a
-wall-clock-dependent refusal would be guest-visible nondeterminism, while a
-delay is invisible to a guest with no ambient clock (law #2 shapes even the
-rate limiter).
-
-## Supervision
-
-Sync-first `spawn` covers composition; crash-recovery of *child* processes is
-supervision (`sched/supervisor.go`): OTP strategies adapted to durable
-  cooperative processes — "restart" means stop the quantum (`Scheduler.Stop`: a
-  queued quantum dequeues, a running one has its context cancelled and the
-  kernel kills the guest) and resubmit; replay reconstructs the child
-  exactly, so a restart loses no committed work. `one-for-one` /
-  `one-for-all` / `rest-for-one`, with supervisor-wide restart intensity
-  (max restarts per window; exceeded → give up and escalate through
-  `OnExit`). Failures burn intensity; strategy-triggered sibling restarts do
-  not. Completed and yielded processes exit supervision normally — crashes are
-  what supervision is for.
+Scheduling is runtime policy, not a kernel primitive: the kernel's whole
+contribution is `Resume` (one cooperative quantum). The fair-share scheduler —
+priority bands, per-owner quota backpressure, virtual-actor residency (the
+journal is the durable process, the instance is cache) — lives in
+aurora-capcompute (`internal/sched`), where its only consumer is. An
+OTP-style supervisor and a delay-only `Throttle` rate limiter were built here
+and removed unconsumed; their designs live in git and `ROADMAP.md`.
 
 ## Persistence and replay
 

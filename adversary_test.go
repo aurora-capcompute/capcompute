@@ -12,12 +12,10 @@ package capcompute_test
 //     host function cannot read/write the host filesystem, read host env/args,
 //     reach the network, exhaust host memory, spin forever, or crash the host
 //     by forcing a dispatcher error.
-//   - Complete mediation (kernel law #4): a guest driven through the real
-//     capcompute.Stack chain (Validator → FlowMonitor → replay → Labeler →
-//     Declassifier → driver) cannot invoke an ungranted capability, pass args
-//     that violate a capability schema, forge the ABI, or move tainted data
-//     into a forbidden sink. Every denial is observed *by the guest*, across
-//     the actual trap boundary.
+//   - The ABI trust boundary: a forged ABI version and non-protobuf bytes are
+//     refused at the host function, and the refusal is observed *by the guest*,
+//     across the actual trap boundary. (Mediation itself — grants, schemas,
+//     flow policy — is the runtime's monitor package, proven in its own tests.)
 
 import (
 	"context"
@@ -34,7 +32,6 @@ import (
 
 	"github.com/aurora-capcompute/capcompute"
 	"github.com/aurora-capcompute/capcompute/sys"
-	"github.com/aurora-capcompute/capcompute/sys/replay/tape/journaled"
 )
 
 type advPID struct{ id string }
@@ -88,25 +85,6 @@ func adversaryWasm(t *testing.T) string {
 	return advWasmPath
 }
 
-// --- in-memory journal (external-package copy of the kernel's test double) ---
-
-type advJournal struct {
-	header    journaled.Header
-	hasHeader bool
-	records   []journaled.Record
-}
-
-func (j *advJournal) Header() (journaled.Header, bool, error) { return j.header, j.hasHeader, nil }
-func (j *advJournal) SetHeader(h journaled.Header) error      { j.header, j.hasHeader = h, true; return nil }
-func (j *advJournal) Append(r journaled.Record) error         { j.records = append(j.records, r); return nil }
-func (j *advJournal) Length() int                             { return len(j.records) }
-func (j *advJournal) Load(idx int) (journaled.Record, error) {
-	if idx < 0 || idx >= len(j.records) {
-		return journaled.Record{}, errors.New("no record")
-	}
-	return j.records[idx], nil
-}
-
 // --- process table ---
 
 type advTable struct {
@@ -137,34 +115,8 @@ func (t *advTable) SaveProcess(_ context.Context, pid string, p *capcompute.Proc
 
 // --- drivers ---
 
-// mediationCaps is the granted surface the mediation tests run against. The
-// grant set handed to the Validator is exactly this, so a name not listed here
-// is ungranted by construction.
-var mediationCaps = []sys.Capability{
-	{Name: "host.echo"},
-	{Name: "host.boom"}, // granted, but its driver returns an infrastructure error
-	{Name: "internet.read", Labels: []string{"untrusted_web"}},
-	{Name: "k8s.delete", Forbid: []string{"untrusted_web"}},
-	{Name: "mail.send", InputSchema: json.RawMessage(`{"type":"object","required":["to"],"properties":{"to":{"type":"string"}}}`)},
-}
-
-// mediationDriver is the leaf. It serves the granted capabilities and returns a
-// Go error for host.boom (an infrastructure failure the guest must never see).
-type mediationDriver struct{}
-
-func (mediationDriver) Dispatch(_ context.Context, _ advPID, sc sys.Syscall, _ sys.Authorization) (sys.SyscallResult, error) {
-	switch sc.Name {
-	case "host.boom":
-		return sys.SyscallResult{}, errors.New("driver boom: infrastructure failure")
-	default:
-		return sys.Result(json.RawMessage(`{"ok":true}`)), nil
-	}
-}
-
-func (mediationDriver) Capabilities() []sys.Capability { return mediationCaps }
-
-// bareEcho is a minimal driver used for host-isolation modes that do not need
-// the mediation chain. host.boom errors; everything else echoes.
+// bareEcho is the minimal leaf driver: host.boom returns an infrastructure
+// error; everything else echoes.
 type bareEcho struct{}
 
 func (bareEcho) Dispatch(_ context.Context, _ advPID, sc sys.Syscall, _ sys.Authorization) (sys.SyscallResult, error) {
@@ -182,7 +134,6 @@ type advSetup struct {
 	memPages uint32
 	timeout  time.Duration
 	driver   sys.Dispatcher[advPID] // leaf driver
-	stack    bool                   // wrap driver in the real capcompute.Stack
 	noSave   bool                   // skip saving the process (to prove not_found)
 }
 
@@ -209,21 +160,6 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 		driver = bareEcho{}
 	}
 	dispatcher := driver
-	if s.stack {
-		journal := &advJournal{}
-		tape, err := journaled.NewTape(journal, journaled.Header{ABI: sys.ABIVersion, Program: "sha256:adversary", Process: "adv"})
-		if err != nil {
-			t.Fatalf("new tape: %v", err)
-		}
-		chain, err := capcompute.Stack[string, advPID]{
-			Grants: func(advPID) []sys.Capability { return driver.Capabilities() },
-			Taints: capcompute.NewTaints[string](),
-		}.ForProcess(tape, driver)
-		if err != nil {
-			t.Fatalf("for process: %v", err)
-		}
-		dispatcher = chain
-	}
 
 	pid := advPID{id: "adv-" + mode}
 	input, _ := json.Marshal(map[string]string{"mode": mode})
@@ -414,37 +350,6 @@ func TestAdversaryAmbientReadsAreDeterministic(t *testing.T) {
 // observed by the guest across the trap boundary.
 // ===========================================================================
 
-func TestAdversaryCannotBypassMediation(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping guest-build test in short mode")
-	}
-	stack := advSetup{driver: mediationDriver{}, stack: true}
-
-	t.Run("ungranted capability is denied", func(t *testing.T) {
-		r := completed(t, "call_ungranted", stack)
-		if r.RStatus != "failed" || r.Code != string(sys.ErrnoDenied) {
-			t.Fatalf("guest observed %s/%s, want failed/denied", r.RStatus, r.Code)
-		}
-	})
-
-	t.Run("schema-violating args are rejected", func(t *testing.T) {
-		r := completed(t, "call_badargs", stack)
-		if r.RStatus != "failed" || r.Code != string(sys.ErrnoInvalidArgs) {
-			t.Fatalf("guest observed %s/%s, want failed/invalid_args", r.RStatus, r.Code)
-		}
-	})
-
-	t.Run("tainted data cannot flow into a forbidden sink", func(t *testing.T) {
-		r := completed(t, "tainted_flow", stack)
-		if r.Detail != "first=result" {
-			t.Fatalf("the untrusted source should have succeeded: %s", r.Detail)
-		}
-		if r.RStatus != "failed" || r.Code != string(sys.ErrnoDenied) {
-			t.Fatalf("guest observed %s/%s for the forbidden sink, want failed/denied", r.RStatus, r.Code)
-		}
-	})
-}
-
 // The guest-facing ABI trust boundary (host.go): a forged ABI version and
 // non-protobuf bytes (a JSON envelope included — the decoder owns that
 // refusal) must all be refused — never routed to a driver.
@@ -452,7 +357,7 @@ func TestAdversaryCannotForgeTheABI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping guest-build test in short mode")
 	}
-	stack := advSetup{driver: mediationDriver{}, stack: true}
+	setup := advSetup{driver: bareEcho{}}
 	for _, tc := range []struct {
 		mode     string
 		wantCode string
@@ -462,7 +367,7 @@ func TestAdversaryCannotForgeTheABI(t *testing.T) {
 		{"forge_garbage", string(sys.ErrnoInvalidArgs)},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
-			r := completed(t, tc.mode, stack)
+			r := completed(t, tc.mode, setup)
 			if r.RStatus != "failed" || r.Code != tc.wantCode {
 				t.Fatalf("guest observed %s/%s, want failed/%s", r.RStatus, r.Code, tc.wantCode)
 			}

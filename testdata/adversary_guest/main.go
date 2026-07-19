@@ -13,11 +13,10 @@
 //   - host isolation (kernel law #1): the guest must not be able to touch the
 //     host filesystem, environment, args, or network. These modes report
 //     whether they "escaped"; the test asserts they never do.
-//   - complete mediation (kernel law #4): the guest must not be able to invoke
-//     a capability the manifest did not grant, pass args that violate a
-//     capability's schema, forge the ABI, or move tainted data into a
-//     forbidden sink. These modes report the errno the host handed back; the
-//     test asserts it is the denial it expects.
+//   - the ABI trust boundary: the guest must not be able to forge the ABI
+//     version or slip non-wire bytes past the host function. These modes
+//     report the errno the host handed back; the test asserts it is the
+//     refusal it expects.
 //
 // The guest cannot tell the difference between "the host let me do it" and
 // "the host stopped me" except by what it observes, so it reports its raw
@@ -106,18 +105,7 @@ func run() int32 {
 		// status. Escaped only if a real fetch succeeded.
 		out.Escaped, out.Detail = tryHTTP()
 
-	// ---- complete mediation (kernel law #4) ----
-
-	case "call_ungranted":
-		// A capability name the manifest never granted.
-		resp := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "danger.rm", Args: []byte(`{}`)})
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
-
-	case "call_badargs":
-		// A granted capability, but args that violate its InputSchema
-		// (schema requires "to" to be a string).
-		resp := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "mail.send", Args: []byte(`{"to":42}`)})
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
+	// ---- the ABI trust boundary ----
 
 	case "forge_abi":
 		// A structurally valid envelope declaring the wrong ABI version.
@@ -134,14 +122,6 @@ func run() int32 {
 		// Non-protobuf, non-JSON bytes: must be rejected, never executed.
 		resp := dispatchRaw([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 		out.RStatus, out.Code = statusName(resp.Status), resp.Code
-
-	case "tainted_flow":
-		// Observe an untrusted-web source, then attempt a sink that forbids it:
-		// the flow monitor must deny the second call.
-		first := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "internet.read", Args: []byte(`{}`)})
-		second := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "k8s.delete", Args: []byte(`{}`)})
-		out.Detail = "first=" + statusName(first.Status)
-		out.RStatus, out.Code = statusName(second.Status), second.Code
 
 	case "probe_syscall":
 		// Used with a process that is NOT in the process table: the host must

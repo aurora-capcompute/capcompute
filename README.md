@@ -23,7 +23,7 @@ delete a file. Three things immediately go wrong:
 3. **The agent guards its own gate.** "A human must approve deletes" lives in the
    agent's prompt — which the AI controls. The prisoner writes the prison rules.
 
-`capcompute` is the runtime where those three have answers:
+`capcompute` is the kernel those answers are built on:
 
 - **Every side effect goes through one recorded gate** the program can't bypass —
   an un‑forgeable audit trail.
@@ -59,10 +59,11 @@ AI agents safely:
    aurora-brains  →  the agent "programs" (Wasm) that run inside
 ```
 
-- **capcompute (this repo)** — the kernel: sandboxing, syscalls, the recorded
-  journal, replay, capability checks.
+- **capcompute (this repo)** — the processor: sandboxing, the one syscall gate,
+  deterministic execution, resource caps.
 - **[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)** —
-  the orchestration runtime built on top (sessions, retries, approvals, sub‑agents).
+  the orchestration runtime built on top: the reference monitor (grants, flow
+  policy), replay, the journal, sessions, retries, approvals, sub‑agents.
 - **[aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers)** —
   the concrete drivers that actually make HTTP calls, read files, call an LLM.
 - **[aurora-brains](https://github.com/aurora-capcompute/aurora-brains)** — the
@@ -76,15 +77,16 @@ You rarely use `capcompute` on its own. It's the engine the rest is built from.
 
 | Feature | The problem it solves |
 | --- | --- |
-| **Capability security** — a program can only call the syscalls it was explicitly granted, checked against a JSON schema | Untrusted / LLM‑written code can't reach anything you didn't hand it ("zero ambient authority") |
-| **Recorded journal** — every syscall is written down *before* it runs (the intent) and *before* the guest sees the answer (the completion), hash‑chained | Tamper‑evident audit trail; the record can't be skipped or forged |
-| **Deterministic replay** — clock and randomness are syscalls, pinned and replayed | A crashed process resumes at the exact instruction, seeing identical values |
-| **Exactly‑once effects** — committed results are served from the journal on replay | No double‑charges after a crash or restart |
-| **Savepoints + rollback (sagas)** — `sys.begin`/`sys.commit` brackets, `sys.compensate` undo actions, `sys.abort` to unwind | Partial work can be cleanly reversed and retried |
+| **One syscall gate, zero ambient authority** — a program's only way to affect anything is the host syscall; no filesystem, no network, no env | Untrusted / LLM‑written code can't reach anything you didn't wire into its dispatcher |
+| **Deterministic execution** — the WASI clock and RNG are kernel‑pinned; a fresh instance observes the identical sequence | The layer above can rebuild a crashed process by replaying its journal to the exact instruction |
+| **Resource caps** — per‑process memory limit and resume deadline | A hostile or buggy guest can't exhaust the host or spin forever |
 | **Yield / resume** — a process can pause on outside work (an approval, a timer) and be resumed later | Human‑in‑the‑loop and long waits without holding a thread |
-| **Information‑flow control** — results carry provenance **labels**; a **flow monitor** refuses a call whose inputs are too "tainted" | Stops sensitive data (or prompt‑injected content) from flowing into dangerous actions |
-| **Child processes** — `sys.spawn` starts sub‑programs with *attenuated* authority (a child can't be granted more than its parent holds) | Safe delegation to sub‑agents |
-| **Fair scheduling & supervision** — priority bands, per‑owner quotas, virtual‑actor residency, OTP‑style restarts | Many tenants share the runtime without starving each other |
+
+The governed‑execution features built *on* this gate — the recorded
+hash‑chained journal, exactly‑once replay, savepoints and compensation,
+capability grants and information‑flow control — live in
+[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
+(its `monitor`, `replay`, and `journaled` packages).
 
 ## Quick start (5 minutes)
 
@@ -228,28 +230,22 @@ names are reserved by the kernel: `sys.begin`, `sys.commit`, `sys.compensate`,
 ## What this library deliberately does **not** own
 
 `capcompute` is intentionally small. It does *not* own job queues, schedulers of
-*when* to resume, durable databases, async completion, or product‑specific agent
-policy. Those belong to the system wrapping it — that's what
-[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute) and
-[aurora-dist](https://github.com/aurora-capcompute/aurora-dist) are.
+*when* to resume, durable databases, async completion, exporters, or
+product‑specific agent policy. Those belong to the system wrapping it — that's
+what [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
+and [aurora-dist](https://github.com/aurora-capcompute/aurora-dist) are.
+The rule is visible in the tree: every `.go` file here is either consumed
+kernel API or a `_test.go` file — built‑ahead code with no consumer gets
+removed (design kept in docs) until a consumer forces it back.
 
 ## Project layout
 
 ```
 kernel.go        Kernel, Process, ProcessTable, the Resume lifecycle
 host.go          the single Extism host function + syscall dispatch
-stack.go         Stack.ForProcess — the canonical dispatcher chain order
-validate.go      Validator: the reference monitor (grants + arg schemas)
-provenance.go    labels, taints, flow monitor, declassifier (data-flow control)
-ambient.go       deterministic clock + RNG (so replay is exact)
-spawn.go         sys.spawn: child processes with attenuated authority
-throttle.go      rate limiting (delays, never denies)
+ambient.go       deterministic clock + RNG (so replay above is exact)
 sys/             the syscall vocabulary: Syscall, Dispatcher, Capability, errno
-  replay/        replay decorator + journal-backed tape (the WAL / audit log)
   wire/          the ABI-v3 protobuf envelope codec (shared with guests)
-sched/           fair-share scheduler + OTP-style supervisor
-sim/             deterministic fault-injection simulation harness
-otelexport/      render a journal as OpenTelemetry traces
 docs/            ARCHITECTURE.md (the OS model), PITCH.md, ROADMAP.md, …
 testdata/        the smallest TinyGo guest fixtures used by integration tests
 ```
