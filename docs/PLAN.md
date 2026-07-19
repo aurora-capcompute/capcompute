@@ -160,7 +160,8 @@ primitive). Staged so value lands before the deepest part.
   Moving a value across a label boundary is an explicit operation that composes
   with `require_approval` (a human authorizes the crossing). DIFC declassify,
   gated by the approval flow you already have.
-- **M4.4 Dual-LLM / control-flow-integrity program** — `SPEC` then `BLOCKED(program work)`
+- **M4.4 Dual-LLM / control-flow-integrity program** — `DONE` (the camel
+  program in aurora-brains: quarantined planner, `$N` routing — ROADMAP #24)
   Trusted plan from the user prompt; quarantined processing of untrusted tool
   outputs with no tool access. The deepest robustness layer; a program-architecture
   change in aurora-brains, not a kernel change. Spec in `ARCHITECTURE.md`; build
@@ -460,13 +461,17 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
 
 ## Recommended starting point
 Everything designed for these repos is `DONE` — M1 through M6, ABI v3, the
-scheduler, quotas, IPC, supervision, the runtime migration, and the
+scheduler, quotas, supervision, the runtime migration, and the
 distribution epoch through D2: the vocabulary cuts (D0.1–D0.4), the
-`aurora-dist` distribution, and the `aurora-cli` terminal. Next up is **D3**:
-the policy layer and the first real connector, per the design above. Standing
+`aurora-dist` distribution, and the `aurora-cli` terminal. Next up is
+**production hardening, not D3**: the 2026-07-05 refocus (ROADMAP "Now",
+items #26–31 — channel auth, server hardening, backup/restore, metrics, LLM
+spend, deploy shape) comes first, and D3's substance (policy layer,
+connectors) is parked with multi-tenancy and additional channels behind their
+return triggers. Standing
 deferrals, unchanged: **M2.3** CPU fuel waits on a wazero fuel mechanism;
 **M5.4** unforgeable capability references wait on evidence that
 authorized-by-cred is insufficient; **journal lifecycle** waits on real
-volume; kernel **IPC/spawn seams** are wired but not yet consumed by the
-runtime (folding delegation onto `sys.spawn` is a candidate once aurora-dist
-exists).
+volume; the kernel **spawn seam** is wired but not yet consumed by the
+runtime (folding delegation onto `sys.spawn` is a candidate now that
+aurora-dist exists).

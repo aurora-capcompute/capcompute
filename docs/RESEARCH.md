@@ -8,6 +8,9 @@ concrete change if one is warranted. Findings are ranked by value.
 Companion docs: `ARCHITECTURE.md` (the OS model and its five laws),
 `ROADMAP.md` (execution order; updated to reflect this review).
 
+> **Settled (2026-07).** Every finding is dispositioned — see *Apply order*
+> at the bottom; the prose stays as the rationale record.
+
 Scope note: several mechanisms live in the `aurora-capcompute` runtime module
 and `aurora-k8s-agent`; they are reviewed here because this library defines the
 laws they must uphold.
@@ -287,10 +290,14 @@ a runtime). This layer is genuinely near the frontier.
 1. ~~**Ambient-surface lockdown (finding 1)**~~ — done (ROADMAP #0).
 2. ~~ROADMAP #1 (journal versioning)~~ done; #2 partial (laws 1/2 tested).
 3. ~~ABI v2 bundle (findings 3 + 6)~~ — done.
-4. **Intent/completion records (finding 8)** — ROADMAP #9; the
-   highest-value open item: closes the audit hole and provides the
-   idempotency floor that findings 9 and spawn both assume.
-5. **Compensation metadata + saga unwinding (finding 9)** — ROADMAP #10;
-   after #9 (unwinding walks completed-effect records).
-6. Task `Kind` field (finding 2) and attenuation-at-grant + epochs
-   (finding 4) — with the runtime migration.
+4. ~~**Intent/completion records (finding 8)**~~ — done (ROADMAP #9: the
+   two-record tape, idempotency keys; attempt-scoped across rollbacks per
+   ROADMAP #25).
+5. ~~**Compensation + saga unwinding (finding 9)**~~ — done, with the verdict
+   overturned in one respect: compensation shipped **guest-registered in the
+   log** (`sys.compensate`/`sys.abort`), not as `sys.Capability` metadata —
+   the declared-metadata design was built, then replaced; capabilities stay
+   pure access control (ROADMAP §10).
+6. Task `Kind` field (finding 2) — still open, with the runtime;
+   attenuation-at-grant + revocation epochs (finding 4) land in the policy
+   layer, parked with multi-tenancy (ROADMAP *Out of scope*).

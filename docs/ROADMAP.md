@@ -39,7 +39,7 @@ Lands in aurora-dist (`internal/dist/api` middleware + config).
 
 `http.Server` currently runs without timeouts. Add `ReadHeaderTimeout`,
 `ReadTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes`, and request
-body size limits on the POST endpoints; add `GET /healthz` for liveness (the
+body size limits on the POST endpoints. `GET /healthz` already ships (the
 process-level check a supervisor needs — deeper health is the metrics' job).
 Lands in aurora-dist (`cmd/aurora-dist`, `internal/dist/api`).
 

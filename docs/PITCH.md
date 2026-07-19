@@ -47,6 +47,12 @@ Then one sentence: "The journal you're looking at is also the mechanism that
 resumed the run — durability and audit are the same log." That's the whole
 architecture, demonstrated instead of claimed.
 
+(Stack note, 2026-07: the chat-card assembly above is the deprecated
+aurora-k8s-agent; the surviving stack runs the same beats headless —
+`aurora-cli` shows the approval task, `kill -9` the `aurora-dist` binary,
+restart, the process resumes; verified end-to-end including a restart
+mid-timer-wait. Chat cards return with the first connector, D3.)
+
 ---
 
 ## Objection kit (steelmen, then answers)
@@ -119,8 +125,9 @@ one-chokepoint mediation work. Linux syscalls are uniform (number + registers),
 and that uniformity is why `strace`/`seccomp`/audit can interpose generically;
 per-interface typed contracts (WIT) optimize app ergonomics at the cost of
 generic interposition — and wazero (the pure-Go runtime) has no component-model
-support at all. Protobuf is the planned v3 *encoding* of the same envelope,
-motivated by schema evolution for long-lived journals, not performance.
+support at all. Protobuf is the shipped v3 *encoding* of the same envelope
+(a hand-rolled reflection-free codec, so guests stay TinyGo-safe), motivated
+by schema evolution for long-lived journals, not performance.
 
 ### "Coarse syscalls must be slow."
 
@@ -130,12 +137,16 @@ statistically zero. Fine-grained hot-path syscalls are not this workload.
 
 ### "The LLM can still be prompt-injected into misusing granted tools."
 
-Don't dodge — this is true and the roadmap says so (CHALLENGE.md A):
-capability gating alone doesn't stop a granted tool being used with tainted
-data. The plan is provenance labels + flow policy at the gate (the CaMeL
-architecture, which is exactly this system's design applied to injection — the
-deterministic mediator CaMeL needs is what the dispatcher already is). Saying
-"here's the known gap and the staged fix" earns more trust than overclaiming.
+Concede the premise, then show the shipped layer (CHALLENGE.md A, all four
+stages): capability gating alone doesn't stop a granted tool being used with
+tainted data — so results carry provenance labels, the gate enforces flow
+policy (tainted data cannot reach a protected capability), declassification is
+an explicit human-approved syscall, and the plan/execute (dual-LLM) camel
+program quarantines untrusted tool output from planning. This is the CaMeL
+architecture as kernel primitives — the deterministic mediator CaMeL needs is
+what the dispatcher already is. Stay honest about the residual: flow policy
+bounds where tainted data can *go*; inside those bounds a fooled model can
+still act badly — which is what approval gates and the audit trail are for.
 
 ---
 
