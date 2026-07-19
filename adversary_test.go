@@ -445,9 +445,9 @@ func TestAdversaryCannotBypassMediation(t *testing.T) {
 	})
 }
 
-// The guest-facing ABI trust boundary (host.go): a forged ABI, a pre-v3 JSON
-// envelope, and raw garbage must all be classified and refused — never routed
-// to a driver.
+// The guest-facing ABI trust boundary (host.go): a forged ABI version and
+// non-protobuf bytes (a JSON envelope included — the decoder owns that
+// refusal) must all be refused — never routed to a driver.
 func TestAdversaryCannotForgeTheABI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping guest-build test in short mode")
@@ -458,7 +458,7 @@ func TestAdversaryCannotForgeTheABI(t *testing.T) {
 		wantCode string
 	}{
 		{"forge_abi", string(sys.ErrnoBadABI)},
-		{"forge_json", string(sys.ErrnoBadABI)},
+		{"forge_json", string(sys.ErrnoInvalidArgs)},
 		{"forge_garbage", string(sys.ErrnoInvalidArgs)},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {

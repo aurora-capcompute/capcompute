@@ -53,12 +53,6 @@ func dispatchSyscall[ID comparable, K PID[ID]](
 		return returnToGuest(plugin, failResponse(sys.ErrnoInvalidArgs, fmt.Errorf("read raw syscall: %w", err).Error()))
 	}
 
-	// A JSON envelope is the pre-v3 wire — classify it as the version
-	// mismatch it is, not as garbage.
-	if len(rawSyscall) > 0 && rawSyscall[0] == '{' {
-		return returnToGuest(plugin, failResponse(sys.ErrnoBadABI,
-			fmt.Sprintf("JSON envelope is pre-v3; host speaks %d (protobuf)", sys.ABIVersion)))
-	}
 	decoded, err := wire.DecodeSyscall(rawSyscall)
 	if err != nil {
 		return returnToGuest(plugin, failResponse(sys.ErrnoInvalidArgs, fmt.Errorf("decode syscall: %w", err).Error()))

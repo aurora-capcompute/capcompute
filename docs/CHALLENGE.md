@@ -182,8 +182,9 @@ design**; WIT/component-model is rejected for this kernel; **protobuf is the
 designated successor encoding as ABI v3**, after M3.1/M4.1 settle the record
 shape. Rationale below — do not relitigate without new facts.
 
-**Shipped.** ABI v3 landed as the clean cut (`abi: 3`; a JSON envelope is
-refused with `bad_abi`). One deliberate deviation from the sketch below: no
+**Shipped.** ABI v3 landed as the clean cut (`abi: 3`; the pre-v3 JSON wire
+is just garbage to the decoder). One deliberate deviation from the sketch
+below: no
 vtprotobuf/prost codegen in guests — the envelope codec is hand-rolled proto3
 wire format (`sys/wire`, dependency-free, mirrored in the Rust SDK), which
 dissolves the TinyGo caveat instead of passing it. Journal records stay

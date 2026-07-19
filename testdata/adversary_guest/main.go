@@ -125,8 +125,8 @@ func run() int32 {
 		out.RStatus, out.Code = statusName(resp.Status), resp.Code
 
 	case "forge_json":
-		// A pre-v3 JSON envelope (leading '{'), which the host must classify as
-		// an ABI mismatch rather than execute.
+		// A JSON envelope: not the wire format, so the decoder must refuse it
+		// rather than execute.
 		resp := dispatchRaw([]byte(`{"abi":3,"name":"host.echo","args":{}}`))
 		out.RStatus, out.Code = statusName(resp.Status), resp.Code
 

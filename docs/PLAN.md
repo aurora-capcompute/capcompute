@@ -262,7 +262,7 @@ WIT would force a runtime switch), migrate the *encoding* to protobuf once the
 record shape settles.
 
 - Shipped as a clean cut: `abi: 3`; host and both guests migrated together;
-  a JSON envelope is refused with `bad_abi`.
+  the pre-v3 JSON wire is just garbage to the decoder (`invalid_args`).
 - **Deviation from the sketch, deliberate:** instead of vtprotobuf/prost
   codegen in guests, the envelope codec is hand-rolled proto3 wire format
   (`sys/wire`, ~200 dependency-free lines; mirrored in `aurora-brains sdk/src/wire.rs`).

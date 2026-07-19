@@ -77,8 +77,7 @@ canonical-JSON encoding: the wire and the store encoding are separate
 concerns, and the journal is the human-readable audit path.
 
 The envelope is versioned (`sys.ABIVersion`); the host rejects mismatches with
-errno `bad_abi` (a JSON envelope is classified as the pre-v3 wire, not as
-garbage). Failures carry a machine-readable errno alongside the human
+errno `bad_abi`. Failures carry a machine-readable errno alongside the human
 message so guests branch on a closed set instead of parsing prose. Two names
 are reserved for **redo scopes** — `sys.begin` / `sys.commit`
 (`sys.SyscallBegin`/`sys.SyscallCommit`), journaled as side-effect-free
