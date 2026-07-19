@@ -10,21 +10,26 @@ Honesty rule kept throughout: some of these are genuine gaps, some are
 defensible choices that only need documenting, and a few are frontier bets
 where the research exists only as papers. Each is labelled.
 
+> **Settled (2026-07).** Every finding is dispositioned — see the Disposition
+> column; per-item detail lives in the ROADMAP ledger and `PLAN.md`. The prose
+> below stays as the rationale record. The "Recommended order" section is
+> historical.
+
 ## Ranked summary
 
-| # | Finding | Kind | Severity | On-thesis |
-|---|---------|------|----------|-----------|
-| A | No information-flow control / data provenance (prompt-injection frontier) | gap | **critical** | ★★★ |
-| B | No resource management (CPU/memory/quota metering) — the missing OS half | gap | **high** | ★★ |
-| C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ |
-| D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ |
-| E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope, protobuf as ABI v3 | ADR (decided) | — | ★ |
-| F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ |
-| G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ |
-| H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ |
-| I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ |
-| J | Capabilities are authorized-by-name, not unforgeable references | classification | low | ★ |
-| K | Journal record is an unprincipled column/payload hybrid (schema drift) | gap | medium | ★★ |
+| # | Finding | Kind | Severity | On-thesis | Disposition |
+|---|---------|------|----------|-----------|-------------|
+| A | No information-flow control / data provenance (prompt-injection frontier) | gap | **critical** | ★★★ | **done** — labels, flow policy, `sys.declassify`, camel program |
+| B | No resource management (CPU/memory/quota metering) — the missing OS half | gap | **high** | ★★ | **done**; CPU fuel deferred (wazero has no fuel) |
+| C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ | **done** (`validate.go`) |
+| D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ | **done** (`sim/`) |
+| E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope, protobuf as ABI v3 | ADR (decided) | — | ★ | **shipped** — ABI v3, `sys/wire` |
+| F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** (`sched/`) |
+| G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ | built, then **removed** as premature; returns on the growth gauge |
+| H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ | **done** (`otelexport/`) |
+| I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ | spawn + supervision **done**; IPC **removed** |
+| J | Capabilities are authorized-by-name, not unforgeable references | classification | low | ★ | documented; **deferred** |
+| K | Journal record is an unprincipled column/payload hybrid (schema drift) | gap | medium | ★★ | **done** (M3.1 envelope+payload) |
 
 ---
 
@@ -177,6 +182,14 @@ design**; WIT/component-model is rejected for this kernel; **protobuf is the
 designated successor encoding as ABI v3**, after M3.1/M4.1 settle the record
 shape. Rationale below — do not relitigate without new facts.
 
+**Shipped.** ABI v3 landed as the clean cut (`abi: 3`; a JSON envelope is
+refused with `bad_abi`). One deliberate deviation from the sketch below: no
+vtprotobuf/prost codegen in guests — the envelope codec is hand-rolled proto3
+wire format (`sys/wire`, dependency-free, mirrored in the Rust SDK), which
+dissolves the TinyGo caveat instead of passing it. Journal records stay
+canonical JSON: the store encoding is separate from the wire, which resolves
+the audit-legibility caveat without a protojson rendering path.
+
 **Why the uniform envelope wins for a mediation kernel.** Linux syscalls have a
 *uniform* calling convention (number + registers), and that uniformity is
 exactly why `strace`, `seccomp-bpf`, ptrace, and audit interpose on every
@@ -294,6 +307,13 @@ deterministic interleaving via per-receiver ordered input log; supervision as
 process metadata (restart strategy, crash propagation, orphan handling). Fold
 into the spawn design in `ARCHITECTURE.md`; no separate roadmap number until
 spawn forces it.
+
+**Outcome — the plan was half overturned.** Spawn and supervision shipped
+(`spawn.go`, `sched/supervisor.go`). IPC went the other way: `sys.send`/
+`sys.recv` was prototyped and then removed — never wired into the runtime
+stack, dead weight. Cross-process data sharing is an explicit granted channel
+(`core.memory`), not ambient message passing; finding J's revisit trigger
+(capability delegation over IPC) recedes with it.
 
 ## J. Capabilities are authorized-by-name, not unforgeable references — classification, not bug
 
