@@ -123,12 +123,6 @@ func run() int32 {
 		resp := dispatchRaw([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 		out.RStatus, out.Code = statusName(resp.Status), resp.Code
 
-	case "probe_syscall":
-		// Used with a process that is NOT in the process table: the host must
-		// answer not_found, never route to a driver.
-		resp := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "host.echo", Args: []byte(`{}`)})
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
-
 	// ---- resource limits / host survival (kernel law #1) ----
 
 	case "dispatch_error":

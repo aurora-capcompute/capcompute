@@ -29,11 +29,11 @@ no preemption; no `Interrupt`: yields are cooperative).
 
 | Code | OS concept | Contract |
 |---|---|---|
-| `Kernel` | **Kernel** (bound to one program image) | owns the process table, wires the syscall entry, spawns processes |
-| wasm module | **Program** (executable image) | on-disk code; many processes may run one program |
+| wasm module | **Program image** | on-disk code; many processes may run one program |
+| `Program` / `NewProgram` | **Loaded program** | one compiled image, a factory of processes; wires the syscall entry |
+| `NewProcess` | **posix_spawn** | instantiate a process: explicit input, credential, dispatcher, quantum deadline — nothing inherited |
 | `Process` | **Process** | one running instance; states idle/active/terminated ≈ ready/running/terminated |
 | `PID` interface / `.PID()` | **PID** | stable, deterministic process identity (same type/method-name pattern as Go's `error`) |
-| `ProcessTable` (`LoadProcess`/`SaveProcess`) | **Process table** | the kernel's lookup boundary for live processes |
 | `Resume` / `ProcessSpec` / `ResumeResult` / `ResumeHandle` | **Schedule a quantum** | give a process CPU until it yields/completes/stops/fails (cooperative) |
 | `sys.Syscall{Name,Args}` | **Syscall** (request) | the guest→host request crossing the trap boundary |
 | `sys.SyscallResult{result\|yield\|failed}` | **Syscall result** | the value/effect returned to the guest |
@@ -57,9 +57,8 @@ no preemption; no `Interrupt`: yields are cooperative).
 
 The guest↔host boundary is a single Extism host function, namespace
 `extism:host/compute`, function `syscall`. The guest emits a `Syscall`; the
-kernel loads the current process from the process table (by PID carried in
-context), dispatches the `Syscall` through that process's driver chain, and
-returns a `SyscallResult`.
+host dispatches the `Syscall` through the driver chain of the process that
+`Resume` planted in the call context, and returns a `SyscallResult`.
 
 ```
 Syscall  (proto3):  abi=1 (uint32, =3) · name=2 (string) · args=3 (bytes, JSON)
@@ -120,7 +119,7 @@ governance and durability claims *provable* rather than aspirational.
 1. **No ambient authority.** A process can do nothing except call granted
    capabilities. (This is the crown jewel — the moment a guest is given ambient
    WASI/host access "for convenience," enforcement degrades to advisory.)
-   *Enforced in code:* `NewKernel` rejects images with `allowed_hosts`/
+   *Enforced in code:* `NewProgram` rejects images with `allowed_hosts`/
    `allowed_paths` (`ErrAmbientAuthority`); guest module config is
    kernel-constructed, never caller-supplied (`ambient.go`).
 2. **Determinism.** Guests are deterministic; *all* non-determinism (clock,
@@ -240,7 +239,7 @@ Agents creating agents is the **`spawn` syscall**. Design decisions, with prior 
 spawn router (its grant carries the manifests of the only programs the
 process may spawn — richer than name-list attenuation). A kernel-side
 `Spawner` decorator implementing the design here was built in parallel
-(attenuation via `sys.Attenuate`, child cred derived from the spawn's
+(attenuation via `monitor.Attenuate`, child cred derived from the spawn's
 idempotency key — strictly stronger than the sketched `spawn_seq`; transitive
 yield; a stopped child keeps the intent open), and **removed unconsumed** —
 the runtime's router is the spawner, so the kernel one had no caller. The

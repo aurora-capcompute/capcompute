@@ -95,7 +95,7 @@ manifest files in aurora-dist.
   Birgisson et al., NDSS '14; the D3 policy layer), per-tenant ceilings and
   quotas, a silo-per-tenant control plane, metering folded from the journal.
   The design intent stays: `TenantID` already threads scopes, leases, memory,
-  and task tokens, and the ceiling already speaks `sys.Attenuate`. Returns
+  and task tokens, and the ceiling already speaks `monitor.Attenuate`. Returns
   when a second tenant is real, as identity → policy → silo control plane, in
   that order.
 - **MCP driver** — bridging stdio MCP servers as granted syscalls
@@ -128,7 +128,7 @@ manifest files in aurora-dist.
 | 1 | Journal program-versioning + replay compatibility check | **done** (`journaled.Header`, `ReplayIncompatibleError`) |
 | 2 | Kernel-law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the rollback matrices and runtime tests cover the rest in practice |
 | 3 | Hash-chained journal (tamper-evident audit) | **done** (`prev_hash`, `journaled.Verify`) |
-| 4 | Capability attenuation helper in `sys` | **done** (`sys.Attenuate`) |
+| 4 | Capability attenuation helper | **done** (now `monitor.Attenuate` — moved with the reference monitor) |
 | 5 | `process.spawn` syscall (sync-first child processes) | **done** — served by the runtime's spawn router; the kernel's parallel `Spawner` decorator was removed unconsumed |
 | 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape, idempotency keys) |
@@ -165,7 +165,8 @@ fails the process with the rollback report; capabilities stay pure access
 control (an earlier metadata-driven design was replaced by this one).
 
 The rollback runs only when resuming is provably impossible — everything else
-resumes. A host interruption and a guest **failure** alike re-drive by replay
+resumes. A host interruption and a guest **failure inside an open section**
+alike re-drive by replay
 under the *same revision*: recorded effects are served, an open intent
 re-drives under its original key, and the registrations the cut-off guest was
 about to make land in the journal — which is what makes registering an undo
@@ -173,7 +174,12 @@ about to make land in the journal — which is what makes registering an undo
 reachable from the recorded history is durable). A failure whose re-drive
 appends nothing has hit a deterministic wall; only then is the revision
 **abandoned**: the registered compensations run, then the process reports
-failed with its original error. A **stop** rolls back immediately — the
+failed with its original error. An **un-bracketed** failure is final on first
+strike (decided 2026-07-19): the section is the guest's declared re-drive
+scope, and to a parent a delegated child's failure — transient blip or not —
+is an observable syscall outcome, journaled and handled like any failed
+driver call; retry policy belongs to the program and the human, not the
+runtime. A **stop** rolls back immediately — the
 human asked for an end, not a resume — and an explicit **restart** abandons
 the whole revision (top-level registrations included) before re-running from
 scratch.

@@ -131,52 +131,49 @@ the guest fixtures under `testdata/`, and the Go tests build and drive them.
 
 ## How you use it (the lifecycle)
 
-A host application wraps the kernel like this:
+A host application uses three calls — `NewProgram`, `NewProcess`, `Resume`:
 
-1. **Create a kernel** from a program image (an Extism Wasm manifest) and a
-   process table:
+1. **Compile a program** from an image (an Extism Wasm manifest):
 
    ```go
-   kernel, err := capcompute.NewKernel[string, Run](ctx, capcompute.Config[string, Run]{
+   program, err := capcompute.NewProgram[Run](ctx, capcompute.Config{
        Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: "plugin.wasm"}}},
        PluginConfig: extism.PluginConfig{EnableWasi: true},
-       ProcessTable: table, // you supply this; the interface is below
    })
-   defer kernel.Shutdown(ctx)
+   defer program.Close(ctx)
    ```
 
-2. **Create a process** from a `ProcessSpec` (its input, entrypoint, credential,
-   and syscall dispatcher):
+2. **Instantiate a process** from it (`posix_spawn` semantics: explicit input,
+   credential, and syscall dispatcher — nothing inherited):
 
    ```go
-   process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, Run]{
+   process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[Run]{
        Input:      json.RawMessage(`{"task":"example"}`),
        Entrypoint: "run",
        Cred:       Run{ID: "proc-1"}, // host-side identity, never visible to the guest
        Dispatcher: myDispatcher{},    // handles this process's syscalls
    })
+   defer process.Close(ctx)
    ```
 
-3. **Save it** into the process table (this makes it visible to syscalls), then
-   **resume** it and read the single result:
+3. **Resume** it and read the single result:
 
    ```go
-   _ = table.SaveProcess(ctx, "proc-1", process)
-   handle, _ := kernel.Resume(ctx, process)
+   handle, _ := capcompute.Resume(ctx, process)
    result := <-handle.Results()
    switch result.Status {
    case capcompute.ResumeCompleted: // the guest finished
    case capcompute.ResumeYielded:   // paused on outside work — resume later
-   case capcompute.ResumeStopped:   // cancelled — recreate before resuming
+   case capcompute.ResumeStopped:   // cancelled — spawn afresh before resuming
    case capcompute.ResumeFailed:    // apply your error policy
    }
    ```
 
-`CreateProcess` does **not** save anything — *you* decide when a process becomes
-visible. `Resume` runs the guest in a goroutine and delivers exactly one
-`ResumeResult`.
+`Resume` runs the guest in a goroutine and delivers exactly one
+`ResumeResult`; the process it planted in the call context is the one the
+syscall host function dispatches through — there is no other lookup.
 
-### The two pieces you provide
+### The one piece you provide
 
 **A dispatcher** — application code that answers one process's syscalls:
 
@@ -192,17 +189,6 @@ func (myDispatcher) Dispatch(ctx context.Context, cred Run, call sys.Syscall, au
     }
 }
 func (myDispatcher) Capabilities() []sys.Capability { return nil }
-```
-
-**A process table** — the kernel's lookup boundary for live processes. The library
-ships only the interface; you provide the implementation (a durable one in
-production; the tests use an in‑memory double):
-
-```go
-type ProcessTable[ID comparable, K PID[ID]] interface {
-    LoadProcess(ctx context.Context, pid ID) (*Process[K], error)
-    SaveProcess(ctx context.Context, pid ID, process *Process[K]) error
-}
 ```
 
 ## The syscall contract (guest ↔ host)
@@ -241,7 +227,7 @@ removed (design kept in docs) until a consumer forces it back.
 ## Project layout
 
 ```
-kernel.go        Kernel, Process, ProcessTable, the Resume lifecycle
+processor.go     Program, Process, NewProcess, Resume — the processor
 host.go          the single Extism host function + syscall dispatch
 ambient.go       deterministic clock + RNG (so replay above is exact)
 sys/             the syscall vocabulary: Syscall, Dispatcher, Capability, errno

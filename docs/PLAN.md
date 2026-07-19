@@ -213,7 +213,7 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   program)`; child gets its **own journal** keyed by child PID; child result
   committed into the parent's tape (replay re-finds, does not re-spawn); parent
   yields while child runs (child-workflow pattern). Host creation
-  (`CreateProcess`) stays a direct kernel API — the init/PID-0 exception.
+  (`capcompute.NewProcess`) stays a direct kernel API — the init/PID-0 exception.
   App supplies a `DeriveCred(parent K, seq int, program string) K` seam.
   Files: new `capcompute/spawn.go`, `ARCHITECTURE.md` spawn section (transitive
   yield: parent's spawn yields when the child yields; resume re-enters the
@@ -356,7 +356,7 @@ the milestone queue above: M1–M6 built the OS, this builds what ships it.
   into the runtime by polling so the in-memory set tracks the filesystem),
   and a **static capability ceiling** (`CreateRun` refuses
   manifests granting beyond the deployment's configured maximum —
-  `sys.Attenuate` at the door; defense in depth against a compromised policy
+  `monitor.Attenuate` at the door; defense in depth against a compromised policy
   layer).
 - `aurora-cli` — the first terminal: a CLI binding directly to `aurora-dist`
   (trusted local single-principal use; no policy layer between). Building it
@@ -452,7 +452,7 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   ticker reconciles armed timers against runtime task state — restart-safe,
   re-arming from persisted tasks and firing elapsed ones at boot), the program
   directory (re-scanned into the runtime on a ticker, digest-diffed) and the
-  capability ceiling (`sys.Attenuate` at process creation over statically
+  capability ceiling (`monitor.Attenuate` at process creation over statically
   derived grant names; open-ended MCP grants are refused under a ceiling). Verified end-to-end with the real agent program
   against a scripted OpenAI-compatible stub, including a full restart
   mid-timer-wait.

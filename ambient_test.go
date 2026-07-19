@@ -11,36 +11,33 @@ import (
 )
 
 // Kernel law #1 (no ambient authority): images granting ambient network or
-// filesystem access are refused at kernel construction.
-func TestNewKernelRejectsAmbientHosts(t *testing.T) {
-	_, err := NewKernel[string, testPID](context.Background(), Config[string, testPID]{
-		Image:        extism.Manifest{AllowedHosts: []string{"example.com"}},
-		ProcessTable: newTestProcessTable(nil),
+// filesystem access are refused at program compilation.
+func TestNewProgramRejectsAmbientHosts(t *testing.T) {
+	_, err := NewProgram[testPID](context.Background(), Config{
+		Image: extism.Manifest{AllowedHosts: []string{"example.com"}},
 	})
 	if !errors.Is(err, ErrAmbientAuthority) {
 		t.Fatalf("error = %v, want ErrAmbientAuthority", err)
 	}
 }
 
-func TestNewKernelRejectsAmbientPaths(t *testing.T) {
-	_, err := NewKernel[string, testPID](context.Background(), Config[string, testPID]{
-		Image:        extism.Manifest{AllowedPaths: map[string]string{"/tmp": "/tmp"}},
-		ProcessTable: newTestProcessTable(nil),
+func TestNewProgramRejectsAmbientPaths(t *testing.T) {
+	_, err := NewProgram[testPID](context.Background(), Config{
+		Image: extism.Manifest{AllowedPaths: map[string]string{"/tmp": "/tmp"}},
 	})
 	if !errors.Is(err, ErrAmbientAuthority) {
 		t.Fatalf("error = %v, want ErrAmbientAuthority", err)
 	}
 }
 
-// Kernel law #1 (no ambient authority): the linear-memory cap is kernel-owned
+// Kernel law #1 (no ambient authority): the linear-memory cap is program-owned
 // (Config.MaxMemoryPages). An image that also sets its own memory ceiling would
 // silently override it (the SDK applies the manifest value last), so such an
-// image is refused at construction.
-func TestNewKernelRejectsImageMemoryOverride(t *testing.T) {
-	_, err := NewKernel[string, testPID](context.Background(), Config[string, testPID]{
+// image is refused at compilation.
+func TestNewProgramRejectsImageMemoryOverride(t *testing.T) {
+	_, err := NewProgram[testPID](context.Background(), Config{
 		Image:          extism.Manifest{Memory: &extism.ManifestMemory{MaxPages: 65536}},
 		MaxMemoryPages: 256,
-		ProcessTable:   newTestProcessTable(nil),
 	})
 	if !errors.Is(err, ErrImageMemoryOverride) {
 		t.Fatalf("error = %v, want ErrImageMemoryOverride", err)

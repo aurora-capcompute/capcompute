@@ -10,7 +10,7 @@ import (
 	"github.com/aurora-capcompute/capcompute/sys/wire"
 )
 
-type pidContextKey struct{}
+type processContextKey struct{}
 
 func failResponse(errno sys.Errno, message string) wire.Response {
 	return wire.Response{Abi: sys.ABIVersion, Status: wire.StatusFailed, Code: string(errno), Message: message}
@@ -18,12 +18,14 @@ func failResponse(errno sys.Errno, message string) wire.Response {
 
 // hostFunction registers the single syscall entry point. Guests import
 // `extism:host/compute syscall`; every host capability flows through it,
-// encoded as the ABI v3 protobuf envelope (sys/wire).
-func hostFunction[ID comparable, K PID[ID]](table ProcessTable[ID, K]) extism.HostFunction {
+// encoded as the ABI v3 protobuf envelope (sys/wire). Resume plants the
+// process in the call context, so the handler dispatches through exactly the
+// process that was given the CPU.
+func hostFunction[K any]() extism.HostFunction {
 	host := extism.NewHostFunctionWithStack(
 		"syscall",
 		func(ctx context.Context, plugin *extism.CurrentPlugin, stack []uint64) {
-			stack[0] = dispatchSyscall(ctx, table, plugin, stack[0])
+			stack[0] = dispatchSyscall[K](ctx, plugin, stack[0])
 		},
 		[]extism.ValueType{extism.ValueTypePTR},
 		[]extism.ValueType{extism.ValueTypePTR},
@@ -32,21 +34,14 @@ func hostFunction[ID comparable, K PID[ID]](table ProcessTable[ID, K]) extism.Ho
 	return host
 }
 
-func dispatchSyscall[ID comparable, K PID[ID]](
+func dispatchSyscall[K any](
 	ctx context.Context,
-	table ProcessTable[ID, K],
 	plugin *extism.CurrentPlugin,
 	offset uint64,
 ) uint64 {
-	pid, ok := ctx.Value(pidContextKey{}).(ID)
-	if !ok {
-		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, "pid missing from context"))
-	}
-	process, err := table.LoadProcess(ctx, pid)
-	if err != nil || process == nil {
-		// A nil process with a nil error is a ProcessTable contract violation;
-		// fail closed with not_found rather than nil-deref process.dispatcher below.
-		return returnToGuest(plugin, failResponse(sys.ErrnoNotFound, "process not found"))
+	process, ok := ctx.Value(processContextKey{}).(*Process[K])
+	if !ok || process == nil {
+		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, "process missing from context"))
 	}
 	rawSyscall, err := plugin.ReadBytes(offset)
 	if err != nil {

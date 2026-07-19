@@ -1,14 +1,14 @@
 # Scope
 
-The process-reconstruction primitives the library set out to provide are in
-place: `ProcessTable` is interface-only (`LoadProcess` / `SaveProcess`),
-`CreateProcess` rebuilds a process and its dispatcher chain from a
-`ProcessSpec`, and the syscall host function reloads the process from the table
-on each guest syscall (see `host.go` and the package doc in `doc.go`).
-Reconstructing a yielded process after a restart is therefore `CreateProcess` +
-`SaveProcess` under the application's control — the library deliberately
-exposes no `Replay(pid)` entry point, because *when* a process resumes and
-*what* is injected back are the wrapping system's decisions.
+The processor primitives the library set out to provide are in place:
+`NewProgram` compiles an image, `NewProcess` instantiates a process and its
+dispatcher chain from a `ProcessSpec`, and `Resume` runs one cooperative
+quantum — the syscall host function dispatches through the process Resume
+planted in the call context (see `host.go` and the package doc in `doc.go`).
+Reconstructing a yielded process after a restart is therefore `NewProcess` under
+the application's control — the library deliberately exposes no `Replay(pid)`
+entry point, because *when* a process resumes and *what* is injected back are
+the wrapping system's decisions.
 
 This library deliberately does not own, and will not grow:
 

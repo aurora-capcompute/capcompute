@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -24,34 +23,6 @@ type integrationPID struct {
 
 func (k integrationPID) PID() string {
 	return k.id
-}
-
-// testProcessTable is an in-memory capcompute.ProcessTable. The kernel ships
-// only the interface; durable tables belong to consumer modules.
-type testProcessTable struct {
-	mu        sync.Mutex
-	processes map[string]*capcompute.Process[integrationPID]
-}
-
-func newTestProcessTable() *testProcessTable {
-	return &testProcessTable{processes: make(map[string]*capcompute.Process[integrationPID])}
-}
-
-func (t *testProcessTable) LoadProcess(_ context.Context, pid string) (*capcompute.Process[integrationPID], error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	process, ok := t.processes[pid]
-	if !ok {
-		return nil, capcompute.ErrProcessRequired
-	}
-	return process, nil
-}
-
-func (t *testProcessTable) SaveProcess(_ context.Context, pid string, process *capcompute.Process[integrationPID]) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.processes[pid] = process
-	return nil
 }
 
 type integrationDispatcher struct{}
@@ -79,22 +50,20 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := newTestProcessTable()
-	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
+	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
 		PluginConfig: extism.PluginConfig{
 			EnableWasi: true,
 		},
-		ProcessTable: table,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := kernel.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown kernel: %v", err)
+		if err := program.Close(context.Background()); err != nil {
+			t.Errorf("close program: %v", err)
 		}
 	})
 
@@ -117,7 +86,7 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("encode input: %v", err)
 			}
-			process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+			process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
 				Input:      input,
 				Entrypoint: "run",
 				Cred:       pid,
@@ -132,11 +101,7 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 				}
 			})
 
-			if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-				t.Fatalf("save process: %v", err)
-			}
-
-			handle, err := kernel.Resume(ctx, process)
+			handle, err := capcompute.Resume(ctx, process)
 			if err != nil {
 				t.Fatalf("resume: %v", err)
 			}
@@ -169,23 +134,21 @@ func TestTinyGoGuestNeverObservesInfrastructureErrors(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := newTestProcessTable()
-	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
+	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
 		Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}},
 		PluginConfig: extism.PluginConfig{EnableWasi: true},
-		ProcessTable: table,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := kernel.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown kernel: %v", err)
+		if err := program.Close(context.Background()); err != nil {
+			t.Errorf("close program: %v", err)
 		}
 	})
 
 	pid := integrationPID{id: "run-infra"}
-	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+	process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
 		Input:      json.RawMessage(`{"mode":"infra"}`),
 		Entrypoint: "run",
 		Cred:       pid,
@@ -199,11 +162,8 @@ func TestTinyGoGuestNeverObservesInfrastructureErrors(t *testing.T) {
 			t.Errorf("close process: %v", err)
 		}
 	})
-	if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-		t.Fatalf("save process: %v", err)
-	}
 
-	handle, err := kernel.Resume(ctx, process)
+	handle, err := capcompute.Resume(ctx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -226,22 +186,20 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := newTestProcessTable()
-	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
+	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
 		PluginConfig: extism.PluginConfig{
 			EnableWasi: true,
 		},
-		ProcessTable: table,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := kernel.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown kernel: %v", err)
+		if err := program.Close(context.Background()); err != nil {
+			t.Errorf("close program: %v", err)
 		}
 	})
 
@@ -254,7 +212,7 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode input: %v", err)
 	}
-	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+	process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
 		Input:      input,
 		Entrypoint: "run",
 		Cred:       pid,
@@ -268,15 +226,12 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 			t.Errorf("close process: %v", err)
 		}
 	})
-	if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-		t.Fatalf("save process: %v", err)
-	}
 
-	handle, err := kernel.Resume(ctx, process)
+	handle, err := capcompute.Resume(ctx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if _, err := kernel.Resume(ctx, process); err != capcompute.ErrProcessActive {
+	if _, err := capcompute.Resume(ctx, process); err != capcompute.ErrProcessActive {
 		t.Fatalf("concurrent resume error = %v, want ErrProcessActive", err)
 	}
 
@@ -299,7 +254,7 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 		t.Fatal("stopped resume returned more than one result")
 	}
 
-	if _, err := kernel.Resume(ctx, process); err != capcompute.ErrProcessTerminated {
+	if _, err := capcompute.Resume(ctx, process); err != capcompute.ErrProcessTerminated {
 		t.Fatalf("resume error = %v, want ErrProcessTerminated", err)
 	}
 }
@@ -349,26 +304,24 @@ func TestTinyGoGuestAmbientReadsAreDeterministic(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := newTestProcessTable()
-	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
+	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
 		PluginConfig: extism.PluginConfig{EnableWasi: true},
-		ProcessTable: table,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := kernel.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown kernel: %v", err)
+		if err := program.Close(context.Background()); err != nil {
+			t.Errorf("close program: %v", err)
 		}
 	})
 
 	observe := func(id string) string {
 		pid := integrationPID{id: id}
-		process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+		process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
 			Input:      []byte(`{"mode":"ambient"}`),
 			Entrypoint: "run",
 			Cred:       pid,
@@ -382,10 +335,7 @@ func TestTinyGoGuestAmbientReadsAreDeterministic(t *testing.T) {
 				t.Errorf("close process: %v", err)
 			}
 		})
-		if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-			t.Fatalf("save process: %v", err)
-		}
-		handle, err := kernel.Resume(ctx, process)
+		handle, err := capcompute.Resume(ctx, process)
 		if err != nil {
 			t.Fatalf("resume: %v", err)
 		}
@@ -417,25 +367,23 @@ func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
 
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
-	table := newTestProcessTable()
-	kernel, err := capcompute.NewKernel[string, integrationPID](ctx, capcompute.Config[string, integrationPID]{
+	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
 		PluginConfig: extism.PluginConfig{EnableWasi: true},
-		ProcessTable: table,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := kernel.Shutdown(context.Background()); err != nil {
-			t.Errorf("shutdown kernel: %v", err)
+		if err := program.Close(context.Background()); err != nil {
+			t.Errorf("close program: %v", err)
 		}
 	})
 
 	pid := integrationPID{id: "ambient-http"}
-	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
+	process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
 		Input:      []byte(`{"mode":"http"}`),
 		Entrypoint: "run",
 		Cred:       pid,
@@ -449,10 +397,7 @@ func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
 			t.Errorf("close process: %v", err)
 		}
 	})
-	if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-		t.Fatalf("save process: %v", err)
-	}
-	handle, err := kernel.Resume(ctx, process)
+	handle, err := capcompute.Resume(ctx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -473,24 +418,23 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 	ctx := context.Background()
 	wasmPath := buildTinyGoIntegrationGuest(t)
 
-	newKernel := func(t *testing.T, table *testProcessTable, config capcompute.Config[string, integrationPID]) *capcompute.Kernel[string, integrationPID] {
+	newProgram := func(t *testing.T, config capcompute.Config) *capcompute.Program[integrationPID] {
 		t.Helper()
 		config.Image = extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}}
 		config.PluginConfig = extism.PluginConfig{EnableWasi: true}
-		config.ProcessTable = table
-		kernel, err := capcompute.NewKernel[string, integrationPID](ctx, config)
+		program, err := capcompute.NewProgram[integrationPID](ctx, config)
 		if err != nil {
-			t.Fatalf("new kernel: %v", err)
+			t.Fatalf("new program: %v", err)
 		}
 		t.Cleanup(func() {
-			if err := kernel.Shutdown(context.Background()); err != nil {
-				t.Errorf("shutdown kernel: %v", err)
+			if err := program.Close(context.Background()); err != nil {
+				t.Errorf("close program: %v", err)
 			}
 		})
-		return kernel
+		return program
 	}
 
-	resume := func(t *testing.T, kernel *capcompute.Kernel[string, integrationPID], table *testProcessTable, mode string) capcompute.ResumeResult[integrationPID] {
+	resume := func(t *testing.T, program *capcompute.Program[integrationPID], mode string, timeout time.Duration) capcompute.ResumeResult {
 		t.Helper()
 		pid := integrationPID{id: "run-" + mode}
 		input, err := json.Marshal(struct {
@@ -499,11 +443,12 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 		if err != nil {
 			t.Fatalf("encode input: %v", err)
 		}
-		process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, integrationPID]{
-			Input:      input,
-			Entrypoint: "run",
-			Cred:       pid,
-			Dispatcher: integrationDispatcher{},
+		process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
+			Input:         input,
+			Entrypoint:    "run",
+			Cred:          pid,
+			Dispatcher:    integrationDispatcher{},
+			ResumeTimeout: timeout,
 		})
 		if err != nil {
 			t.Fatalf("create process: %v", err)
@@ -513,10 +458,7 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 				t.Errorf("close process: %v", err)
 			}
 		})
-		if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-			t.Fatalf("save process: %v", err)
-		}
-		handle, err := kernel.Resume(ctx, process)
+		handle, err := capcompute.Resume(ctx, process)
 		if err != nil {
 			t.Fatalf("resume: %v", err)
 		}
@@ -530,11 +472,10 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 	}
 
 	t.Run("memory cap traps the hog", func(t *testing.T) {
-		table := newTestProcessTable()
-		kernel := newKernel(t, table, capcompute.Config[string, integrationPID]{
+		program := newProgram(t, capcompute.Config{
 			MaxMemoryPages: 256, // 16 MiB
 		})
-		result := resume(t, kernel, table, "hog")
+		result := resume(t, program, "hog", 0)
 		if result.Status != capcompute.ResumeFailed {
 			t.Fatalf("status = %s, want %s; err = %v", result.Status, capcompute.ResumeFailed, result.Err)
 		}
@@ -544,11 +485,8 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 	})
 
 	t.Run("deadline stops the infinite loop", func(t *testing.T) {
-		table := newTestProcessTable()
-		kernel := newKernel(t, table, capcompute.Config[string, integrationPID]{
-			ResumeTimeout: time.Second,
-		})
-		result := resume(t, kernel, table, "infinite")
+		program := newProgram(t, capcompute.Config{})
+		result := resume(t, program, "infinite", time.Second)
 		if result.Status != capcompute.ResumeStopped {
 			t.Fatalf("status = %s, want %s; err = %v", result.Status, capcompute.ResumeStopped, result.Err)
 		}

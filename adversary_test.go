@@ -85,34 +85,6 @@ func adversaryWasm(t *testing.T) string {
 	return advWasmPath
 }
 
-// --- process table ---
-
-type advTable struct {
-	mu        sync.Mutex
-	processes map[string]*capcompute.Process[advPID]
-}
-
-func newAdvTable() *advTable {
-	return &advTable{processes: make(map[string]*capcompute.Process[advPID])}
-}
-
-func (t *advTable) LoadProcess(_ context.Context, pid string) (*capcompute.Process[advPID], error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	p, ok := t.processes[pid]
-	if !ok {
-		return nil, capcompute.ErrProcessRequired
-	}
-	return p, nil
-}
-
-func (t *advTable) SaveProcess(_ context.Context, pid string, p *capcompute.Process[advPID]) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.processes[pid] = p
-	return nil
-}
-
 // --- drivers ---
 
 // bareEcho is the minimal leaf driver: host.boom returns an infrastructure
@@ -134,26 +106,22 @@ type advSetup struct {
 	memPages uint32
 	timeout  time.Duration
 	driver   sys.Dispatcher[advPID] // leaf driver
-	noSave   bool                   // skip saving the process (to prove not_found)
 }
 
-func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResult[advPID], *advReport) {
+func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResult, *advReport) {
 	t.Helper()
 	ctx := context.Background()
 	wasm := adversaryWasm(t)
-	table := newAdvTable()
 
-	kernel, err := capcompute.NewKernel[string, advPID](ctx, capcompute.Config[string, advPID]{
+	program, err := capcompute.NewProgram[advPID](ctx, capcompute.Config{
 		Image:          extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasm}}},
 		PluginConfig:   extism.PluginConfig{EnableWasi: true},
-		ProcessTable:   table,
 		MaxMemoryPages: s.memPages,
-		ResumeTimeout:  s.timeout,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
-	t.Cleanup(func() { _ = kernel.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = program.Close(context.Background()) })
 
 	driver := s.driver
 	if driver == nil {
@@ -163,27 +131,23 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 
 	pid := advPID{id: "adv-" + mode}
 	input, _ := json.Marshal(map[string]string{"mode": mode})
-	process, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, advPID]{
-		Input:      input,
-		Entrypoint: "run",
-		Cred:       pid,
-		Dispatcher: dispatcher,
+	process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[advPID]{
+		Input:         input,
+		Entrypoint:    "run",
+		Cred:          pid,
+		Dispatcher:    dispatcher,
+		ResumeTimeout: s.timeout,
 	})
 	if err != nil {
-		t.Fatalf("create process: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := process.Close(context.Background()); err != nil && !errors.Is(err, capcompute.ErrProcessActive) {
 			t.Errorf("close process: %v", err)
 		}
 	})
-	if !s.noSave {
-		if err := table.SaveProcess(ctx, pid.PID(), process); err != nil {
-			t.Fatalf("save process: %v", err)
-		}
-	}
 
-	handle, err := kernel.Resume(ctx, process)
+	handle, err := capcompute.Resume(ctx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -199,7 +163,7 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 		return result, &report
 	case <-time.After(30 * time.Second):
 		t.Fatalf("resume(%s) did not return", mode)
-		return capcompute.ResumeResult[advPID]{}, nil
+		return capcompute.ResumeResult{}, nil
 	}
 }
 
@@ -290,31 +254,26 @@ func TestAdversaryDispatchErrorDoesNotCrashHost(t *testing.T) {
 	}
 	ctx := context.Background()
 	wasm := adversaryWasm(t)
-	table := newAdvTable()
-	kernel, err := capcompute.NewKernel[string, advPID](ctx, capcompute.Config[string, advPID]{
+	program, err := capcompute.NewProgram[advPID](ctx, capcompute.Config{
 		Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasm}}},
 		PluginConfig: extism.PluginConfig{EnableWasi: true},
-		ProcessTable: table,
 	})
 	if err != nil {
-		t.Fatalf("new kernel: %v", err)
+		t.Fatalf("new program: %v", err)
 	}
-	t.Cleanup(func() { _ = kernel.Shutdown(context.Background()) })
+	t.Cleanup(func() { _ = program.Close(context.Background()) })
 
-	run := func(mode string) capcompute.ResumeResult[advPID] {
+	run := func(mode string) capcompute.ResumeResult {
 		pid := advPID{id: "adv-" + mode}
 		input, _ := json.Marshal(map[string]string{"mode": mode})
-		proc, err := kernel.CreateProcess(ctx, capcompute.ProcessSpec[string, advPID]{
+		proc, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[advPID]{
 			Input: input, Entrypoint: "run", Cred: pid, Dispatcher: bareEcho{},
 		})
 		if err != nil {
-			t.Fatalf("create %s: %v", mode, err)
+			t.Fatalf("spawn %s: %v", mode, err)
 		}
 		t.Cleanup(func() { _ = proc.Close(context.Background()) })
-		if err := table.SaveProcess(ctx, pid.PID(), proc); err != nil {
-			t.Fatalf("save %s: %v", mode, err)
-		}
-		handle, err := kernel.Resume(ctx, proc)
+		handle, err := capcompute.Resume(ctx, proc)
 		if err != nil {
 			t.Fatalf("resume %s: %v", mode, err)
 		}
@@ -377,12 +336,3 @@ func TestAdversaryCannotForgeTheABI(t *testing.T) {
 
 // A syscall from a process the table does not know must be answered not_found,
 // never routed to a driver.
-func TestAdversarySyscallFromUnknownProcess(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping guest-build test in short mode")
-	}
-	r := completed(t, "probe_syscall", advSetup{driver: bareEcho{}, noSave: true})
-	if r.RStatus != "failed" || r.Code != string(sys.ErrnoNotFound) {
-		t.Fatalf("guest observed %s/%s, want failed/not_found", r.RStatus, r.Code)
-	}
-}

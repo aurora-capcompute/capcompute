@@ -14,57 +14,51 @@ import (
 )
 
 var (
-	ErrAmbientAuthority     = errors.New("image grants ambient authority")
-	ErrImageMemoryOverride  = errors.New("image overrides the kernel-owned memory cap")
-	ErrInvalidGuestOutput   = errors.New("invalid guest output")
-	ErrProcessActive        = errors.New("process is already active")
-	ErrProcessRequired      = errors.New("process is required")
-	ErrProcessTableRequired = errors.New("process table is required")
-	ErrProcessTerminated    = errors.New("process is terminated")
+	ErrAmbientAuthority    = errors.New("image grants ambient authority")
+	ErrImageMemoryOverride = errors.New("image overrides the program-owned memory cap")
+	ErrInvalidGuestOutput  = errors.New("invalid guest output")
+	ErrProcessActive       = errors.New("process is already active")
+	ErrProcessRequired     = errors.New("process is required")
+	ErrProcessTerminated   = errors.New("process is terminated")
 )
 
-// PID lets user-owned process data expose the stable process identity used for
-// process maps. (Compare Go's stdlib `error` interface: the type and its one
-// method share a name.)
+// PID is the identity contract layers above key on (taints, schedulers,
+// process maps): a credential that can name its process. The processor itself
+// runs anonymous processes and never requires it. (Compare Go's stdlib
+// `error` interface: the type and its one method share a name.)
 type PID[ID comparable] interface {
 	PID() ID
 }
 
-// Config contains everything needed to compile a program and create per-process instances.
+// Config contains everything needed to compile a program image.
 //
 // Image is the program image (an Extism manifest naming the wasm and static
 // config). It must not grant ambient authority: AllowedHosts and AllowedPaths
 // must be empty — network and filesystem access are capabilities served by the
 // dispatcher, never ambient rights. Guest module configuration (clock, RNG,
-// env) is owned by the kernel and cannot be supplied by the caller.
-type Config[ID comparable, K PID[ID]] struct {
+// env) is owned by the processor and cannot be supplied by the caller.
+type Config struct {
 	Image        extism.Manifest
 	PluginConfig extism.PluginConfig
-	ProcessTable ProcessTable[ID, K]
 
 	// MaxMemoryPages caps each process's linear memory in 64KiB wasm pages
 	// (0 = runtime default). A guest allocating past the cap traps and the
 	// resume reports ResumeFailed.
 	MaxMemoryPages uint32
-
-	// ResumeTimeout bounds the wall-clock time of one Resume quantum
-	// (0 = unbounded). A guest still running at the deadline is stopped and
-	// the resume reports ResumeStopped with context.DeadlineExceeded.
-	ResumeTimeout time.Duration
 }
 
-// Kernel owns one compiled program image and spawns processes from it.
-type Kernel[ID comparable, K PID[ID]] struct {
-	compiled      *extism.CompiledPlugin
-	processTable  ProcessTable[ID, K]
-	resumeTimeout time.Duration
+// Program is one compiled program image: a factory of processes. Many
+// processes may run one program; K is the credential type their syscalls
+// carry.
+type Program[K any] struct {
+	compiled *extism.CompiledPlugin
 }
 
-// Process owns the reusable Extism plugin instance for one PID.
+// Process owns the reusable Extism plugin instance for one spawned program.
 // Process state is not thread-safe; callers coordinate concurrent use.
 //
 // Cred is the host-side credential for the process: it identifies the process
-// (PID) and carries whatever authority context the app attaches. It is never
+// and carries whatever authority context the app attaches. It is never
 // visible to or supplied by the guest.
 type Process[K any] struct {
 	Cred       K
@@ -73,15 +67,8 @@ type Process[K any] struct {
 	plugin     *extism.Plugin
 	dispatcher sys.Dispatcher[K]
 	ambient    *ambientSources
+	timeout    time.Duration
 	state      processState
-}
-
-// Capabilities returns the operations exposed by this process's dispatcher.
-func (process *Process[K]) Capabilities() []sys.Capability {
-	if process == nil {
-		return nil
-	}
-	return process.dispatcher.Capabilities()
 }
 
 type processStatus uint8
@@ -156,37 +143,24 @@ func (process *Process[K]) Close(ctx context.Context) error {
 	return process.plugin.Close(ctx)
 }
 
-// ProcessTable owns per-PID processes.
-type ProcessTable[ID comparable, K PID[ID]] interface {
-	LoadProcess(ctx context.Context, pid ID) (*Process[K], error)
-	SaveProcess(ctx context.Context, pid ID, process *Process[K]) error
-}
-
-// NewKernel compiles a program and registers the syscall host function. It
-// rejects images that grant ambient authority (non-empty AllowedHosts or
-// AllowedPaths) with ErrAmbientAuthority.
-func NewKernel[ID comparable, K PID[ID]](ctx context.Context, config Config[ID, K]) (*Kernel[ID, K], error) {
-	if config.ProcessTable == nil {
-		return nil, ErrProcessTableRequired
-	}
+// NewProgram compiles a program image and registers the syscall host
+// function. It rejects images that grant ambient authority (non-empty
+// AllowedHosts or AllowedPaths) with ErrAmbientAuthority.
+func NewProgram[K any](ctx context.Context, config Config) (*Program[K], error) {
 	if len(config.Image.AllowedHosts) > 0 {
 		return nil, errors.Join(ErrAmbientAuthority, errors.New("image sets allowed_hosts; network access must be a dispatched capability"))
 	}
 	if len(config.Image.AllowedPaths) > 0 {
 		return nil, errors.Join(ErrAmbientAuthority, errors.New("image sets allowed_paths; filesystem access must be a dispatched capability"))
 	}
-	// The linear-memory cap is kernel-owned (Config.MaxMemoryPages). An image
-	// that also sets memory.max_pages would silently win (the SDK applies it
-	// last), so an image trying to set its own ceiling — raising it above the
-	// kernel's cap, or claiming ownership of a limit the kernel guarantees — is
-	// refused. Other manifest memory knobs (var/http byte caps) are untouched.
+	// The linear-memory cap is processor-owned (Config.MaxMemoryPages). An
+	// image that also sets memory.max_pages would silently win (the SDK applies
+	// it last), so an image trying to set its own ceiling — raising it above
+	// the configured cap, or claiming ownership of a limit the processor
+	// guarantees — is refused. Other manifest memory knobs (var/http byte caps)
+	// are untouched.
 	if config.Image.Memory != nil && config.Image.Memory.MaxPages > 0 {
-		return nil, errors.Join(ErrImageMemoryOverride, errors.New("image sets memory.max_pages; the memory cap is kernel-owned via Config.MaxMemoryPages"))
-	}
-
-	kernel := &Kernel[ID, K]{
-		processTable:  config.ProcessTable,
-		resumeTimeout: config.ResumeTimeout,
+		return nil, errors.Join(ErrImageMemoryOverride, errors.New("image sets memory.max_pages; the memory cap is program-owned via Config.MaxMemoryPages"))
 	}
 
 	runtimeConfig := config.PluginConfig.RuntimeConfig
@@ -200,27 +174,32 @@ func NewKernel[ID comparable, K PID[ID]](ctx context.Context, config Config[ID, 
 	config.PluginConfig.RuntimeConfig = runtimeConfig
 
 	compiled, err := extism.NewCompiledPlugin(ctx, config.Image, config.PluginConfig, []extism.HostFunction{
-		hostFunction(kernel.processTable),
+		hostFunction[K](),
 	})
 	if err != nil {
 		return nil, err
 	}
-	kernel.compiled = compiled
-	return kernel, nil
+	return &Program[K]{compiled: compiled}, nil
 }
 
-// Shutdown releases the compiled program image without touching processes or tables.
-func (k *Kernel[ID, K]) Shutdown(ctx context.Context) error {
-	return k.compiled.Close(ctx)
+// Close releases the compiled program image without touching processes.
+func (p *Program[K]) Close(ctx context.Context) error {
+	return p.compiled.Close(ctx)
 }
 
-// ProcessSpec describes one process to create: its program input, entrypoint,
-// credential, and the dispatcher that will serve its syscalls.
-type ProcessSpec[ID comparable, K PID[ID]] struct {
+// ProcessSpec describes one process: its program input, entrypoint,
+// credential, the dispatcher that will serve its syscalls, and its quantum
+// deadline.
+type ProcessSpec[K any] struct {
 	Input      json.RawMessage
 	Entrypoint string
 	Cred       K
 	Dispatcher sys.Dispatcher[K]
+
+	// ResumeTimeout bounds the wall-clock time of one Resume quantum
+	// (0 = unbounded). A guest still running at the deadline is stopped and
+	// the resume reports ResumeStopped with context.DeadlineExceeded.
+	ResumeTimeout time.Duration
 }
 
 // ResumeStatus is the result of one guest invocation attempt.
@@ -234,7 +213,7 @@ const (
 )
 
 // ResumeResult is delivered when the resume goroutine exits.
-type ResumeResult[K any] struct {
+type ResumeResult struct {
 	Status ResumeStatus
 	Output json.RawMessage
 	Exit   uint32
@@ -242,8 +221,8 @@ type ResumeResult[K any] struct {
 }
 
 // ResumeHandle controls one active guest invocation.
-type ResumeHandle[K any] struct {
-	results chan ResumeResult[K]
+type ResumeHandle struct {
+	results chan ResumeResult
 	cancel  context.CancelFunc
 
 	mu            sync.Mutex
@@ -252,7 +231,7 @@ type ResumeHandle[K any] struct {
 }
 
 // Results returns the channel that receives exactly one result before closing.
-func (h *ResumeHandle[K]) Results() <-chan ResumeResult[K] {
+func (h *ResumeHandle) Results() <-chan ResumeResult {
 	if h == nil {
 		return nil
 	}
@@ -260,7 +239,7 @@ func (h *ResumeHandle[K]) Results() <-chan ResumeResult[K] {
 }
 
 // Stop interrupts this invocation. It is safe to call Stop more than once.
-func (h *ResumeHandle[K]) Stop() {
+func (h *ResumeHandle) Stop() {
 	if h == nil {
 		return
 	}
@@ -275,12 +254,14 @@ func (h *ResumeHandle[K]) Stop() {
 	cancel()
 }
 
-// CreateProcess instantiates a fresh process from the kernel's program image.
-// It does not save the process; the caller decides when it becomes visible in
-// the process table.
-func (k *Kernel[ID, K]) CreateProcess(ctx context.Context, spec ProcessSpec[ID, K]) (*Process[K], error) {
+// NewProcess instantiates a fresh process from the program image —
+// posix_spawn semantics: a named program, explicit input, explicitly handed
+// authority (the dispatcher), nothing inherited. The guest-side counterpart
+// is the reserved sys.spawn syscall, served above the processor by whatever
+// spawner the runtime composes.
+func NewProcess[K any](ctx context.Context, program *Program[K], spec ProcessSpec[K]) (*Process[K], error) {
 	moduleConfig, ambient := guestModuleConfig()
-	plugin, err := k.compiled.Instance(ctx, extism.PluginInstanceConfig{
+	plugin, err := program.compiled.Instance(ctx, extism.PluginInstanceConfig{
 		ModuleConfig: moduleConfig,
 	})
 	if err != nil {
@@ -293,13 +274,14 @@ func (k *Kernel[ID, K]) CreateProcess(ctx context.Context, spec ProcessSpec[ID, 
 		plugin:     plugin,
 		dispatcher: spec.Dispatcher,
 		ambient:    ambient,
+		timeout:    spec.ResumeTimeout,
 	}, nil
 }
 
 // Resume gives a process the CPU in its own goroutine and returns its control
 // handle. The process runs until it completes, yields, fails, or is stopped —
 // cooperative scheduling, no preemption.
-func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*ResumeHandle[K], error) {
+func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, error) {
 	if process == nil {
 		return nil, ErrProcessRequired
 	}
@@ -313,25 +295,24 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 	// safe to do before launching the run.
 	process.ambient.reset()
 
-	pid := process.Cred.PID()
 	var (
 		callCtx context.Context
 		cancel  context.CancelFunc
 	)
-	if k.resumeTimeout > 0 {
-		callCtx, cancel = context.WithTimeout(ctx, k.resumeTimeout)
+	if process.timeout > 0 {
+		callCtx, cancel = context.WithTimeout(ctx, process.timeout)
 	} else {
 		callCtx, cancel = context.WithCancel(ctx)
 	}
-	handle := &ResumeHandle[K]{
-		results: make(chan ResumeResult[K], 1),
+	handle := &ResumeHandle{
+		results: make(chan ResumeResult, 1),
 		cancel:  cancel,
 	}
 	go func() {
 		defer cancel()
 		defer close(handle.results)
 
-		pluginCtx := context.WithValue(callCtx, pidContextKey{}, pid)
+		pluginCtx := context.WithValue(callCtx, processContextKey{}, process)
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
 		handle.mu.Lock()
@@ -346,16 +327,16 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 			if stopErr == nil {
 				stopErr = context.Canceled
 			}
-			handle.results <- ResumeResult[K]{Status: ResumeStopped, Exit: exit, Err: stopErr}
+			handle.results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: stopErr}
 			return
 		}
 		if err != nil {
-			handle.results <- ResumeResult[K]{Status: ResumeFailed, Exit: exit, Err: err}
+			handle.results <- ResumeResult{Status: ResumeFailed, Exit: exit, Err: err}
 			return
 		}
 		status, statusErr := resumeStatus(output)
 		if statusErr != nil {
-			handle.results <- ResumeResult[K]{
+			handle.results <- ResumeResult{
 				Status: ResumeFailed,
 				Output: append(json.RawMessage(nil), output...),
 				Exit:   exit,
@@ -364,14 +345,14 @@ func (k *Kernel[ID, K]) Resume(ctx context.Context, process *Process[K]) (*Resum
 			return
 		}
 		if status == ResumeYielded {
-			handle.results <- ResumeResult[K]{
+			handle.results <- ResumeResult{
 				Status: ResumeYielded,
 				Output: append(json.RawMessage(nil), output...),
 				Exit:   exit,
 			}
 			return
 		}
-		handle.results <- ResumeResult[K]{
+		handle.results <- ResumeResult{
 			Status: ResumeCompleted,
 			Output: append(json.RawMessage(nil), output...),
 			Exit:   exit,

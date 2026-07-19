@@ -2,22 +2,19 @@
 // Extism compute guests: wasm programs run as processes whose only access to
 // the outside world is host-dispatched syscalls.
 //
-// The package owns the compiled program image (Kernel), process lifecycle, and
-// the guest-to-host syscall wiring. Concrete storage, durable reconstruction,
-// and application scheduling stay outside this package.
+// The package is a processor — three calls:
+//   - NewProgram compiles a program image, rejecting any ambient authority
+//     (no allowed hosts or paths; clock, RNG, and env are pinned by the
+//     processor, never caller-supplied);
+//   - NewProcess instantiates a process from a program — posix_spawn semantics:
+//     explicit input, an explicit credential, an explicitly handed syscall
+//     dispatcher, nothing inherited;
+//   - Resume gives a process the CPU for one cooperative quantum, until it
+//     completes, yields, fails, or is stopped.
 //
-// A typical runtime does the following:
-//   - build a Kernel with a wasm Manifest and a ProcessTable;
-//   - create a Process from a ProcessSpec, which carries the process's dispatcher;
-//   - save that Process in the ProcessTable before invoking Resume if the guest
-//     can make syscalls;
-//   - call Resume and read the single ResumeResult from the returned handle;
-//   - close processes and the Kernel at the application boundary.
-//
-// The syscall host function receives only the PID through context. It loads the
-// Process from the ProcessTable and dispatches the guest Syscall through the
-// process dispatcher. This keeps runtime lookup explicit and avoids hidden
-// invocation state in context.
+// Resume plants the process in the call context, so the syscall host
+// function dispatches through exactly the process that was given the CPU —
+// there is no other lookup.
 //
 // Resume has four observable outcomes. A successful guest call whose JSON
 // output contains {"status":"yielded"} returns ResumeYielded, while an explicit
@@ -26,13 +23,7 @@
 // permanently terminates that physical process. Guest and runtime errors also
 // return ResumeFailed.
 //
-// ProcessTable is a runtime lookup boundary. Durable stores should persist the
-// data needed by their application to recreate processes, then hydrate a fresh
-// Kernel with CreateProcess and SaveProcess when a host process restarts.
-// CreateProcess deliberately does not save processes; callers decide when a
-// process becomes visible to syscalls and when it is removed.
-//
-// The library does not own replay scheduling, async completion, durable journal
-// policy, or process cleanup timing. Those are conventions of the wrapping
-// system using this package.
+// The library does not own process lookup, replay scheduling, async
+// completion, durable journal policy, or process cleanup timing. Those are
+// conventions of the wrapping system using this package.
 package capcompute
