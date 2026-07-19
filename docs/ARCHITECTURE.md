@@ -1,14 +1,4 @@
-# capcompute — Kernel Architecture (the OS model)
-
-This document is the **design north star** for capcompute. It describes the system
-as what it structurally is: a small **operating system for WebAssembly guests**.
-The metaphor is not decoration — it is a build discipline. When a new feature is
-proposed, the first question is *"what OS concept is this?"*, because that question
-comes with 50 years of prior art about how to get it right.
-
-Use this as the shared vocabulary for both human and LLM-assisted development.
-
-## What this is (honest classification)
+## What this is
 
 capcompute is a **library operating system** — OS abstractions provided as a Go
 library linked into a host application, not a standalone kernel on hardware. It is:
@@ -22,11 +12,6 @@ library linked into a host application, not a standalone kernel on hardware. It 
   EROS);
 - **durably replayable** — the journal doubles as crash-recovery *and* audit trail
   (lineage: durable execution — Temporal; VM replay — ReVirt).
-
-Closest living relatives: the **Erlang/OTP BEAM** (an OS-like runtime with
-processes, supervision, message passing) and **Golem** (wasm + durable replay).
-This is a real, identifiable design point — not a novel one. Where a decision is
-open, port it from that prior art rather than reinventing it.
 
 ## Glossary (code name → OS concept → contract)
 
@@ -402,12 +387,6 @@ v1*, replay must still produce a consistent process — and that is not free:
    expensive. A periodic committed snapshot (checkpoint) of process state caps
    replay to "since last snapshot" — the classic single-level-store move, and it
    also gives migration a clean seam.
-
-**Why it matters more than the renames.** Post-rename the system reads as
-coherent, but coherence is only *proven* when it survives change. "How does program
-v2 replay a v1 journal?" is the question that tests whether this architecture stays
-coherent as it does real work. Answer it deliberately; do not let the first
-breaking program change answer it by accident.
 
 ## Non-goals (resist gold-plating)
 
