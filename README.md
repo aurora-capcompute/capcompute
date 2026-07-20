@@ -136,7 +136,7 @@ A host application uses three calls — `NewProgram`, `NewProcess`, `Resume`:
 1. **Compile a program** from an image (an Extism Wasm manifest):
 
    ```go
-   program, err := capcompute.NewProgram[Run](ctx, capcompute.Config{
+   program, err := capcompute.NewProgram(ctx, capcompute.Config{
        Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: "plugin.wasm"}}},
        PluginConfig: extism.PluginConfig{EnableWasi: true},
    })
