@@ -13,7 +13,7 @@ import (
 // Kernel law #1 (no ambient authority): images granting ambient network or
 // filesystem access are refused at program compilation.
 func TestNewProgramRejectsAmbientHosts(t *testing.T) {
-	_, err := NewProgram[testPID](context.Background(), Config{
+	_, err := NewProgram(context.Background(), Config{
 		Image: extism.Manifest{AllowedHosts: []string{"example.com"}},
 	})
 	if !errors.Is(err, ErrAmbientAuthority) {
@@ -22,7 +22,7 @@ func TestNewProgramRejectsAmbientHosts(t *testing.T) {
 }
 
 func TestNewProgramRejectsAmbientPaths(t *testing.T) {
-	_, err := NewProgram[testPID](context.Background(), Config{
+	_, err := NewProgram(context.Background(), Config{
 		Image: extism.Manifest{AllowedPaths: map[string]string{"/tmp": "/tmp"}},
 	})
 	if !errors.Is(err, ErrAmbientAuthority) {
@@ -35,7 +35,7 @@ func TestNewProgramRejectsAmbientPaths(t *testing.T) {
 // silently override it (the SDK applies the manifest value last), so such an
 // image is refused at compilation.
 func TestNewProgramRejectsImageMemoryOverride(t *testing.T) {
-	_, err := NewProgram[testPID](context.Background(), Config{
+	_, err := NewProgram(context.Background(), Config{
 		Image:          extism.Manifest{Memory: &extism.ManifestMemory{MaxPages: 65536}},
 		MaxMemoryPages: 256,
 	})

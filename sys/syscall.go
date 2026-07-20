@@ -8,9 +8,13 @@ import (
 
 // ABIVersion is the syscall wire version this kernel speaks. Guests declare
 // it on every Syscall; the host rejects mismatches with ErrnoBadABI. Since
-// v3 the wire encoding is the protobuf envelope in package sys/wire; the
-// JSON tags on these types serve journals and audit rendering, not the wire.
-const ABIVersion = 3
+// v4 the wire encoding is JSON — a Syscall in, a SyscallResult out — so the
+// JSON tags on these types are the wire, the journal, and the audit
+// rendering at once. v3's protobuf envelope was removed: it required a second
+// hand-rolled codec per language for the same six fields these types already
+// encode, and the typed-args benefits that justified it were never reachable
+// while args stayed opaque payloads.
+const ABIVersion = 4
 
 // Reserved syscall names. Savepoint brackets are journaled as side-effect-free
 // markers by the host: on a failed-process resume, the journal is forked just past

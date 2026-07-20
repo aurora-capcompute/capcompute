@@ -125,9 +125,10 @@ one-chokepoint mediation work. Linux syscalls are uniform (number + registers),
 and that uniformity is why `strace`/`seccomp`/audit can interpose generically;
 per-interface typed contracts (WIT) optimize app ergonomics at the cost of
 generic interposition — and wazero (the pure-Go runtime) has no component-model
-support at all. Protobuf is the shipped v3 *encoding* of the same envelope
-(a hand-rolled reflection-free codec, so guests stay TinyGo-safe), motivated
-by schema evolution for long-lived journals, not performance.
+support at all. The *encoding* of that envelope is JSON (ABI v4): protobuf was
+tried as v3 and withdrawn, because its payoff needed typed args rather than a
+typed envelope, and the envelope alone cost a hand-rolled codec in every guest
+language.
 
 ### "Coarse syscalls must be slow."
 

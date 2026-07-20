@@ -61,22 +61,27 @@ host dispatches the `Syscall` through the driver chain of the process that
 `Resume` planted in the call context, and returns a `SyscallResult`.
 
 ```
-Syscall  (proto3):  abi=1 (uint32, =3) · name=2 (string) · args=3 (bytes, JSON)
-Response (proto3):  abi=1 · status=2 (result|yield|failed) · code=3 (errno)
-                    · result=4 (bytes, JSON) · message=5 · labels=6 (repeated)
+Syscall:   {"abi":4, "name":"mail.send", "args":{…}}
+Response:  {"status":"result"|"yield"|"failed", "code":"<errno>",
+            "result":{…}, "message":"…", "labels":[…]}
 ```
 
-Since v3 the envelope is protobuf (`sys/wire/envelope.proto` — the interop
-source of truth). The codec is hand-rolled and reflection-free (~200
-dependency-free lines shared by the host and the Go program; the Rust program
-mirrors it), which is what makes it TinyGo-safe without dragging
-`protoreflect` into guests; interop is pinned against protoc-generated
-reference code, cross-language golden fixtures, and an unknown-field-skipping
-test (the schema-evolution contract: add fields freely, never reuse a
-number). The `args`/`result` payloads stay opaque JSON — the envelope stays
-the one uniform shape generic interposition needs. Journal records keep
-canonical-JSON encoding: the wire and the store encoding are separate
-concerns, and the journal is the human-readable audit path.
+Since v4 the envelope is JSON — it *is* the wire form of `sys.Syscall` and
+`sys.SyscallResult`, produced by the struct tags those types already carry.
+There is no wire package and nothing is translated at the boundary: the host
+unmarshals a `sys.Syscall`, hands that exact value to the dispatcher chain,
+and marshals the `sys.SyscallResult` that comes back. The envelope stays one
+uniform shape — what generic interposition needs — with `args`/`result`
+nesting inside it as opaque payloads. Journal records use the same encoding,
+so the audit path is simply the wire read back.
+
+v3 was a protobuf envelope with a hand-rolled, reflection-free codec on each
+side of the boundary. It was withdrawn in v4: the benefits that motivated it
+(protovalidate/CEL, per-field sensitivity annotations) need typed *payloads*
+rather than a typed envelope, and typing payloads would have put real codegen
+back inside guests — the cost the hand-rolling existed to avoid. What it
+charged in the meantime was a second codec per language for the same six
+fields these types already encode. See CHALLENGE.md finding E.
 
 The envelope is versioned (`sys.ABIVersion`); the host rejects mismatches with
 errno `bad_abi`. Failures carry a machine-readable errno alongside the human

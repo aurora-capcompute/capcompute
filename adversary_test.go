@@ -1,10 +1,9 @@
 package capcompute_test
 
-// End-to-end adversarial proofs. Unlike integration_tinygo_test.go (which needs
-// TinyGo and therefore skips in most CI), these build a hostile guest with the
-// *standard* Go toolchain (GOOS=wasip1) — the same `go` that runs the tests — so
-// the guarantees below are exercised everywhere `go test` runs, never silently
-// skipped.
+// End-to-end adversarial proofs. Like integration_test.go, these build a
+// hostile guest with the *standard* Go toolchain (GOOS=wasip1) — the same `go`
+// that runs the tests — so the guarantees below are exercised everywhere
+// `go test` runs, never silently skipped.
 //
 // Two properties are proven through the real seams, not decorator doubles:
 //
@@ -12,7 +11,7 @@ package capcompute_test
 //     host function cannot read/write the host filesystem, read host env/args,
 //     reach the network, exhaust host memory, spin forever, or crash the host
 //     by forcing a dispatcher error.
-//   - The ABI trust boundary: a forged ABI version and non-protobuf bytes are
+//   - The ABI trust boundary: a forged ABI version and non-envelope bytes are
 //     refused at the host function, and the refusal is observed *by the guest*,
 //     across the actual trap boundary. (Mediation itself — grants, schemas,
 //     flow policy — is the runtime's monitor package, proven in its own tests.)
@@ -113,7 +112,7 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 	ctx := context.Background()
 	wasm := adversaryWasm(t)
 
-	program, err := capcompute.NewProgram[advPID](ctx, capcompute.Config{
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image:          extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasm}}},
 		PluginConfig:   extism.PluginConfig{EnableWasi: true},
 		MaxMemoryPages: s.memPages,
@@ -254,7 +253,7 @@ func TestAdversaryDispatchErrorDoesNotCrashHost(t *testing.T) {
 	}
 	ctx := context.Background()
 	wasm := adversaryWasm(t)
-	program, err := capcompute.NewProgram[advPID](ctx, capcompute.Config{
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasm}}},
 		PluginConfig: extism.PluginConfig{EnableWasi: true},
 	})
@@ -310,8 +309,8 @@ func TestAdversaryAmbientReadsAreDeterministic(t *testing.T) {
 // ===========================================================================
 
 // The guest-facing ABI trust boundary (host.go): a forged ABI version and
-// non-protobuf bytes (a JSON envelope included — the decoder owns that
-// refusal) must all be refused — never routed to a driver.
+// bytes that are no envelope at all must both be refused — never routed to a
+// driver.
 func TestAdversaryCannotForgeTheABI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping guest-build test in short mode")
@@ -322,7 +321,6 @@ func TestAdversaryCannotForgeTheABI(t *testing.T) {
 		wantCode string
 	}{
 		{"forge_abi", string(sys.ErrnoBadABI)},
-		{"forge_json", string(sys.ErrnoInvalidArgs)},
 		{"forge_garbage", string(sys.ErrnoInvalidArgs)},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {

@@ -23,7 +23,7 @@ where the research exists only as papers. Each is labelled.
 | B | No resource management (CPU/memory/quota metering) — the missing OS half | gap | **high** | ★★ | **done**; CPU fuel deferred (wazero has no fuel) |
 | C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ | **done** — the runtime's `monitor` package |
 | D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ | **done** (`sim/`, in aurora-capcompute) |
-| E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope, protobuf as ABI v3 | ADR (decided) | — | ★ | **shipped** — ABI v3, `sys/wire` |
+| E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope; protobuf shipped as v3, **reverted to JSON in v4** | ADR (decided, amended) | — | ★ | **shipped** — ABI v4, JSON envelope in `sys` |
 | F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** — lives in the runtime (`internal/sched`) |
 | G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ | built, then **removed** as premature; returns on the growth gauge |
 | H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ | built, then **removed** unconsumed; returns as dist ops |
@@ -190,6 +190,31 @@ wire format (`sys/wire`, dependency-free, mirrored in the Rust SDK), which
 dissolves the TinyGo caveat instead of passing it. Journal records stay
 canonical JSON: the store encoding is separate from the wire, which resolves
 the audit-legibility caveat without a protojson rendering path.
+
+**Amended 2026-07-20 — ABI v4 returns the envelope to JSON.** The new fact is
+that the deviation recorded above hollowed out the decision it deviated from.
+Motivations 2 and 3 below (protovalidate/CEL, custom field options for
+per-field sensitivity, typed codegen) are all properties of typed **args** —
+"a field marked secret that `internet.read` args may not carry" is the
+payload, not the envelope. Args are opaque bytes by design, because payload
+opacity is what keeps the envelope uniform for generic interposition. Typing
+them would require real codegen inside guests, which is precisely the TinyGo
+gate the hand-rolling was built to dodge. So the protobuf envelope could not
+advance any of its own stated motivations while args stayed opaque; motivation
+4 disclaimed performance outright; and motivation 1's long-lived records are
+the journal, which was already canonical JSON and never rode the wire. What
+remained was the cost: a second hand-rolled codec per language, plus a `.proto`
+and protoc-generated reference code, to carry the same six fields that
+`sys.Syscall`/`sys.SyscallResult` already encode as JSON for the journal. The
+minimal-TCB argument had also gone hollow, since guests already link
+`encoding/json` and `serde_json` for the payloads one layer down.
+
+v4 deletes `sys/wire` and its Rust mirror and lets the `sys` types be the wire
+directly. Everything above about *keeping the uniform envelope* — and
+rejecting WIT/component-model, which was the actual contest in this finding —
+stands unchanged. If typed payloads are ever wanted, that is a payload-schema
+decision to take on its own merits, and it does not need a protobuf envelope
+to get there.
 
 **Why the uniform envelope wins for a mediation kernel.** Linux syscalls have a
 *uniform* calling convention (number + registers), and that uniformity is
@@ -398,7 +423,7 @@ else opaque, nothing duplicated.
 
 **Plan — a principle, not a milestone.** Fold the record-schema redesign into
 **M3.1** (which already reshapes the journal for intent/completion) and
-**ABI v3** (which sets the payload encoding), so the record is reshaped once, not
+the **ABI encoding** work (v3, since superseded by v4), so the record is reshaped once, not
 three times. In capcompute: make the `journaled` record contract an explicit
 `{envelope, payload}` with the envelope fields above; document the single-source
 rule. The downstream SQLite/`task.Record` cleanup is `BLOCKED` on the

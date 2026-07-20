@@ -1,5 +1,10 @@
-//go:build tinygo
+//go:build wasip1
 
+// Command integration_guest is the smallest real Extism guest used by
+// capcompute's integration tests. It is built with the standard Go toolchain
+// (GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared), the same `go` that
+// runs the tests, so the integration proofs run anywhere `go` does — no extra
+// toolchain, no silent skip.
 package main
 
 import (
@@ -11,13 +16,11 @@ import (
 
 	"github.com/extism/go-pdk"
 
-	"github.com/aurora-capcompute/capcompute/sys/wire"
+	"github.com/aurora-capcompute/capcompute/sys"
 )
 
 //go:wasmimport extism:host/compute syscall
 func hostSyscall(uint64) uint64
-
-const abiVersion = 3
 
 type input struct {
 	Mode string `json:"mode"`
@@ -38,28 +41,28 @@ func run() int32 {
 
 	switch in.Mode {
 	case "completed":
-		response, err := dispatch(wire.Syscall{Name: "host.echo", Args: []byte(`{"value":"ok"}`)})
+		result, err := dispatch(sys.Syscall{Name: "host.echo", Args: json.RawMessage(`{"value":"ok"}`)})
 		if err != nil {
 			pdk.SetError(err)
 			return 1
 		}
-		if response.Status != wire.StatusResult {
+		if result.Status() != sys.StatusResult {
 			pdk.SetErrorString("expected result status")
 			return 1
 		}
-		if err := pdk.OutputJSON(output{Status: "completed", Observation: response.Result}); err != nil {
+		if err := pdk.OutputJSON(output{Status: "completed", Observation: result.Result()}); err != nil {
 			pdk.SetError(err)
 			return 1
 		}
 		return 0
 
 	case "yielded":
-		response, err := dispatch(wire.Syscall{Name: "host.yield"})
+		result, err := dispatch(sys.Syscall{Name: "host.yield"})
 		if err != nil {
 			pdk.SetError(err)
 			return 1
 		}
-		if response.Status != wire.StatusYield {
+		if result.Status() != sys.StatusYield {
 			pdk.SetErrorString("expected yield status")
 			return 1
 		}
@@ -78,8 +81,8 @@ func run() int32 {
 	// journaled, so the guest must not observe it); control must never return
 	// here. Completing with the observed status would prove the law broken.
 	case "infra":
-		response, err := dispatch(wire.Syscall{Name: "host.missing"})
-		observation, _ := json.Marshal(fmt.Sprintf("status=%s err=%v", response.Status, err))
+		result, err := dispatch(sys.Syscall{Name: "host.missing"})
+		observation, _ := json.Marshal(fmt.Sprintf("status=%s err=%v", result.Status(), err))
 		if err := pdk.OutputJSON(output{Status: "completed", Observation: observation}); err != nil {
 			pdk.SetError(err)
 			return 1
@@ -141,18 +144,26 @@ func run() int32 {
 	}
 }
 
-func dispatch(sc wire.Syscall) (wire.Response, error) {
-	sc.Abi = abiVersion
-	request := pdk.AllocateBytes(wire.EncodeSyscall(sc))
+// The wasip1 c-shared build needs a main symbol; the module's real entry
+// point is the exported run above.
+func main() {}
+
+func dispatch(sc sys.Syscall) (sys.SyscallResult, error) {
+	sc.Abi = sys.ABIVersion
+	encoded, err := json.Marshal(sc)
+	if err != nil {
+		return sys.SyscallResult{}, fmt.Errorf("encode syscall: %w", err)
+	}
+	request := pdk.AllocateBytes(encoded)
 	defer request.Free()
 
 	responseOffset := hostSyscall(request.Offset())
-	response, err := wire.DecodeResponse(pdk.ParamBytes(responseOffset))
-	if err != nil {
-		return wire.Response{}, fmt.Errorf("decode host response: %w", err)
+	var result sys.SyscallResult
+	if err := json.Unmarshal(pdk.ParamBytes(responseOffset), &result); err != nil {
+		return sys.SyscallResult{}, fmt.Errorf("decode host response: %w", err)
 	}
-	if response.Status == wire.StatusFailed {
-		return wire.Response{}, fmt.Errorf("host failed (%s): %s", response.Code, response.Message)
+	if result.Status() == sys.StatusFailed {
+		return sys.SyscallResult{}, fmt.Errorf("host failed (%s): %s", result.Errno(), result.Message())
 	}
-	return response, nil
+	return result, nil
 }

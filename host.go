@@ -2,30 +2,32 @@ package capcompute
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	extism "github.com/extism/go-sdk"
 
 	"github.com/aurora-capcompute/capcompute/sys"
-	"github.com/aurora-capcompute/capcompute/sys/wire"
 )
 
-type processContextKey struct{}
+type syscallContextKey struct{}
 
-func failResponse(errno sys.Errno, message string) wire.Response {
-	return wire.Response{Abi: sys.ABIVersion, Status: wire.StatusFailed, Code: string(errno), Message: message}
-}
+// syscallFunc is one process's dispatch, already bound to its credential and
+// dispatcher. Resume plants it in the call context, which is the whole of what
+// the host function needs to know about the process that was given the CPU —
+// so nothing here is generic over the credential type.
+type syscallFunc func(context.Context, sys.Syscall) (sys.SyscallResult, error)
 
 // hostFunction registers the single syscall entry point. Guests import
 // `extism:host/compute syscall`; every host capability flows through it,
-// encoded as the ABI v3 protobuf envelope (sys/wire). Resume plants the
-// process in the call context, so the handler dispatches through exactly the
-// process that was given the CPU.
-func hostFunction[K any]() extism.HostFunction {
+// encoded as the ABI v4 JSON envelope — a sys.Syscall in, a sys.SyscallResult
+// out, the same types and the same JSON the dispatcher chain and the journal
+// already speak, so nothing is translated at the boundary.
+func hostFunction() extism.HostFunction {
 	host := extism.NewHostFunctionWithStack(
 		"syscall",
 		func(ctx context.Context, plugin *extism.CurrentPlugin, stack []uint64) {
-			stack[0] = dispatchSyscall[K](ctx, plugin, stack[0])
+			stack[0] = dispatchSyscall(ctx, plugin, stack[0])
 		},
 		[]extism.ValueType{extism.ValueTypePTR},
 		[]extism.ValueType{extism.ValueTypePTR},
@@ -34,30 +36,30 @@ func hostFunction[K any]() extism.HostFunction {
 	return host
 }
 
-func dispatchSyscall[K any](
+func dispatchSyscall(
 	ctx context.Context,
 	plugin *extism.CurrentPlugin,
 	offset uint64,
 ) uint64 {
-	process, ok := ctx.Value(processContextKey{}).(*Process[K])
-	if !ok || process == nil {
-		return returnToGuest(plugin, failResponse(sys.ErrnoInternal, "process missing from context"))
+	dispatch, ok := ctx.Value(syscallContextKey{}).(syscallFunc)
+	if !ok || dispatch == nil {
+		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInternal, "process missing from context"))
 	}
 	rawSyscall, err := plugin.ReadBytes(offset)
 	if err != nil {
-		return returnToGuest(plugin, failResponse(sys.ErrnoInvalidArgs, fmt.Errorf("read raw syscall: %w", err).Error()))
+		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInvalidArgs, fmt.Errorf("read raw syscall: %w", err).Error()))
 	}
 
-	decoded, err := wire.DecodeSyscall(rawSyscall)
-	if err != nil {
-		return returnToGuest(plugin, failResponse(sys.ErrnoInvalidArgs, fmt.Errorf("decode syscall: %w", err).Error()))
+	var syscall sys.Syscall
+	if err := json.Unmarshal(rawSyscall, &syscall); err != nil {
+		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInvalidArgs, fmt.Errorf("decode syscall: %w", err).Error()))
 	}
-	if decoded.Abi != sys.ABIVersion {
-		return returnToGuest(plugin, failResponse(sys.ErrnoBadABI,
-			fmt.Sprintf("syscall abi %d, host speaks %d", decoded.Abi, sys.ABIVersion)))
+	if syscall.Abi != sys.ABIVersion {
+		return returnToGuest(plugin, sys.FailCode(sys.ErrnoBadABI,
+			fmt.Sprintf("syscall abi %d, host speaks %d", syscall.Abi, sys.ABIVersion)))
 	}
 
-	result, err := process.dispatcher.Dispatch(ctx, process.Cred, wire.ToSyscall(decoded), sys.Authorization{})
+	result, err := dispatch(ctx, syscall)
 	if err != nil {
 		// An infrastructure error is not an outcome: nothing was journaled, so
 		// the guest must not observe it (journal-before-observe covers the
@@ -66,13 +68,17 @@ func dispatchSyscall[K any](
 		// resolves it under the original idempotency key. A handler-level
 		// failure (a failed SyscallResult) still flows to the guest as a
 		// recoverable observation; only the machinery's own errors trap.
-		panic(fmt.Errorf("dispatch %s: %w", decoded.Name, err))
+		panic(fmt.Errorf("dispatch %s: %w", syscall.Name, err))
 	}
-	return returnToGuest(plugin, wire.FromResult(result))
+	return returnToGuest(plugin, result)
 }
 
-func returnToGuest(plugin *extism.CurrentPlugin, response wire.Response) uint64 {
-	offset, err := plugin.WriteBytes(wire.EncodeResponse(response))
+func returnToGuest(plugin *extism.CurrentPlugin, result sys.SyscallResult) uint64 {
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		panic(fmt.Errorf("encode host response: %w", err))
+	}
+	offset, err := plugin.WriteBytes(encoded)
 	if err != nil {
 		panic(fmt.Errorf("write host response: %w", err))
 	}

@@ -48,9 +48,9 @@ type Config struct {
 }
 
 // Program is one compiled program image: a factory of processes. Many
-// processes may run one program; K is the credential type their syscalls
-// carry.
-type Program[K any] struct {
+// processes may run one program, and they need not share a credential type —
+// the image is just code, so the credential lives on the Process.
+type Program struct {
 	compiled *extism.CompiledPlugin
 }
 
@@ -146,7 +146,7 @@ func (process *Process[K]) Close(ctx context.Context) error {
 // NewProgram compiles a program image and registers the syscall host
 // function. It rejects images that grant ambient authority (non-empty
 // AllowedHosts or AllowedPaths) with ErrAmbientAuthority.
-func NewProgram[K any](ctx context.Context, config Config) (*Program[K], error) {
+func NewProgram(ctx context.Context, config Config) (*Program, error) {
 	if len(config.Image.AllowedHosts) > 0 {
 		return nil, errors.Join(ErrAmbientAuthority, errors.New("image sets allowed_hosts; network access must be a dispatched capability"))
 	}
@@ -174,16 +174,16 @@ func NewProgram[K any](ctx context.Context, config Config) (*Program[K], error) 
 	config.PluginConfig.RuntimeConfig = runtimeConfig
 
 	compiled, err := extism.NewCompiledPlugin(ctx, config.Image, config.PluginConfig, []extism.HostFunction{
-		hostFunction[K](),
+		hostFunction(),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &Program[K]{compiled: compiled}, nil
+	return &Program{compiled: compiled}, nil
 }
 
 // Close releases the compiled program image without touching processes.
-func (p *Program[K]) Close(ctx context.Context) error {
+func (p *Program) Close(ctx context.Context) error {
 	return p.compiled.Close(ctx)
 }
 
@@ -259,7 +259,7 @@ func (h *ResumeHandle) Stop() {
 // authority (the dispatcher), nothing inherited. The guest-side counterpart
 // is the reserved sys.spawn syscall, served above the processor by whatever
 // spawner the runtime composes.
-func NewProcess[K any](ctx context.Context, program *Program[K], spec ProcessSpec[K]) (*Process[K], error) {
+func NewProcess[K any](ctx context.Context, program *Program, spec ProcessSpec[K]) (*Process[K], error) {
 	moduleConfig, ambient := guestModuleConfig()
 	plugin, err := program.compiled.Instance(ctx, extism.PluginInstanceConfig{
 		ModuleConfig: moduleConfig,
@@ -312,7 +312,13 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 		defer cancel()
 		defer close(handle.results)
 
-		pluginCtx := context.WithValue(callCtx, processContextKey{}, process)
+		// Bind this process's credential and dispatcher into one closure: the
+		// host function needs nothing else, so the syscall path carries no
+		// process and stays free of the credential type.
+		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
+			return process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
+		})
+		pluginCtx := context.WithValue(callCtx, syscallContextKey{}, dispatch)
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
 		handle.mu.Lock()

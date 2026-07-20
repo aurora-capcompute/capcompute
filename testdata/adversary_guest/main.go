@@ -1,11 +1,10 @@
 //go:build wasip1
 
 // Command adversary_guest is a deliberately hostile Extism guest used by
-// capcompute's security tests. Unlike testdata/integration_guest (which needs
-// TinyGo), this program is built with the standard Go toolchain
-// (GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared), so the adversarial
-// proofs run in any environment that already has `go` — no extra toolchain,
-// no silent skip.
+// capcompute's security tests. Like testdata/integration_guest, it is built
+// with the standard Go toolchain (GOOS=wasip1 GOARCH=wasm go build
+// -buildmode=c-shared), so the adversarial proofs run in any environment that
+// already has `go` — no extra toolchain, no silent skip.
 //
 // Every mode attempts to break one of the two guarantees the kernel makes to
 // the host that embeds it:
@@ -26,19 +25,18 @@ package main
 import (
 	crand "crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/extism/go-pdk"
 
-	"github.com/aurora-capcompute/capcompute/sys/wire"
+	"github.com/aurora-capcompute/capcompute/sys"
 )
 
 //go:wasmimport extism:host/compute syscall
 func hostSyscall(uint64) uint64
-
-const abiVersion = 3
 
 type input struct {
 	Mode string `json:"mode"`
@@ -68,8 +66,9 @@ func run() int32 {
 
 	switch in.Mode {
 	case "echo":
-		resp := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "host.echo", Args: []byte(`{"v":1}`)})
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
+		out.RStatus, out.Code = mustDispatch(sys.Syscall{
+			Abi: sys.ABIVersion, Name: "host.echo", Args: json.RawMessage(`{"v":1}`),
+		})
 
 	// ---- host isolation (kernel law #1) ----
 
@@ -108,20 +107,14 @@ func run() int32 {
 	// ---- the ABI trust boundary ----
 
 	case "forge_abi":
-		// A structurally valid envelope declaring the wrong ABI version.
-		resp := mustDispatch(wire.Syscall{Abi: 2, Name: "host.echo", Args: []byte(`{}`)})
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
-
-	case "forge_json":
-		// A JSON envelope: not the wire format, so the decoder must refuse it
-		// rather than execute.
-		resp := dispatchRaw([]byte(`{"abi":3,"name":"host.echo","args":{}}`))
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
+		// A structurally valid envelope declaring an ABI the host does not speak.
+		out.RStatus, out.Code = mustDispatch(sys.Syscall{
+			Abi: sys.ABIVersion + 1, Name: "host.echo", Args: json.RawMessage(`{}`),
+		})
 
 	case "forge_garbage":
-		// Non-protobuf, non-JSON bytes: must be rejected, never executed.
-		resp := dispatchRaw([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
+		// Bytes that are not an envelope in any encoding: rejected, never executed.
+		out.RStatus, out.Code = dispatchRaw([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 
 	// ---- resource limits / host survival (kernel law #1) ----
 
@@ -129,9 +122,11 @@ func run() int32 {
 		// The driver returns a Go (infrastructure) error. The host must trap
 		// the quantum; the guest must never observe an outcome. Reaching the
 		// line after the dispatch would prove journal-before-observe broken.
-		resp := mustDispatch(wire.Syscall{Abi: abiVersion, Name: "host.boom", Args: []byte(`{}`)})
+		rstatus, code := mustDispatch(sys.Syscall{
+			Abi: sys.ABIVersion, Name: "host.boom", Args: json.RawMessage(`{}`),
+		})
 		out.Detail = "guest observed an unjournaled outcome"
-		out.RStatus, out.Code = statusName(resp.Status), resp.Code
+		out.RStatus, out.Code = rstatus, code
 
 	case "hog":
 		var chunks [][]byte
@@ -171,36 +166,37 @@ func run() int32 {
 	return 0
 }
 
-// mustDispatch sends a syscall and returns the host response, treating only a
-// decode failure as fatal (a StatusFailed response is a valid observation).
-func mustDispatch(sc wire.Syscall) wire.Response {
-	return dispatchRaw(wire.EncodeSyscall(sc))
+// mustDispatch sends a syscall and reports what the host answered as the
+// (status, errno) pair the test asserts on. Only a codec failure is fatal; a
+// failed response is a valid observation.
+func mustDispatch(sc sys.Syscall) (rstatus, code string) {
+	encoded, err := json.Marshal(sc)
+	if err != nil {
+		pdk.SetError(fmt.Errorf("encode syscall: %w", err))
+		return "unspecified", "guest_encode_error"
+	}
+	return dispatchRaw(encoded)
 }
 
-func dispatchRaw(payload []byte) wire.Response {
+func dispatchRaw(payload []byte) (rstatus, code string) {
 	mem := pdk.AllocateBytes(payload)
 	defer mem.Free()
 	off := hostSyscall(mem.Offset())
-	resp, err := wire.DecodeResponse(pdk.ParamBytes(off))
-	if err != nil {
+
+	var result sys.SyscallResult
+	if err := json.Unmarshal(pdk.ParamBytes(off), &result); err != nil {
 		pdk.SetError(fmt.Errorf("decode host response: %w", err))
-		// Return a sentinel the test will not mistake for a real status.
-		return wire.Response{Status: wire.StatusUnspecified, Code: "guest_decode_error"}
+		// A sentinel the test will not mistake for a real host status.
+		return "unspecified", "guest_decode_error"
 	}
-	return resp
+	return statusName(result.Status()), string(result.Errno())
 }
 
-func statusName(s wire.Status) string {
-	switch s {
-	case wire.StatusResult:
-		return "result"
-	case wire.StatusYield:
-		return "yield"
-	case wire.StatusFailed:
-		return "failed"
-	default:
+func statusName(s sys.SyscallStatus) string {
+	if s == "" {
 		return "unspecified"
 	}
+	return string(s)
 }
 
 func tryFSRead() (escaped bool, detail string) {

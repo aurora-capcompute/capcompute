@@ -26,6 +26,6 @@ dist/
 coverage.out
 *.test
 
-# TinyGo/Wasm build artifacts
+# Wasm build artifacts
 *.wasm
 *.wat

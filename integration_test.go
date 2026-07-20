@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,17 +41,14 @@ func (integrationDispatcher) Dispatch(_ context.Context, _ integrationPID, sysca
 
 func (integrationDispatcher) Capabilities() []sys.Capability { return nil }
 
-func TestTinyGoGuestResumeStates(t *testing.T) {
+func TestGuestResumeStates(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping TinyGo integration test in short mode")
-	}
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		t.Skip("tinygo not found")
+		t.Skip("skipping Wasm integration test in short mode")
 	}
 
 	ctx := context.Background()
-	wasmPath := buildTinyGoIntegrationGuest(t)
-	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
+	wasmPath := integrationWasm(t)
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
@@ -124,17 +122,14 @@ func TestTinyGoGuestResumeStates(t *testing.T) {
 // covers the indeterminate case. The quantum traps and the resume fails with
 // the dispatch error; the guest's infra mode would otherwise complete and
 // report the error it saw.
-func TestTinyGoGuestNeverObservesInfrastructureErrors(t *testing.T) {
+func TestGuestNeverObservesInfrastructureErrors(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping TinyGo integration test in short mode")
-	}
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		t.Skip("tinygo not found")
+		t.Skip("skipping Wasm integration test in short mode")
 	}
 
 	ctx := context.Background()
-	wasmPath := buildTinyGoIntegrationGuest(t)
-	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
+	wasmPath := integrationWasm(t)
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}},
 		PluginConfig: extism.PluginConfig{EnableWasi: true},
 	})
@@ -176,17 +171,14 @@ func TestTinyGoGuestNeverObservesInfrastructureErrors(t *testing.T) {
 	}
 }
 
-func TestTinyGoGuestCanBeStopped(t *testing.T) {
+func TestGuestCanBeStopped(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping TinyGo integration test in short mode")
-	}
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		t.Skip("tinygo not found")
+		t.Skip("skipping Wasm integration test in short mode")
 	}
 
 	ctx := context.Background()
-	wasmPath := buildTinyGoIntegrationGuest(t)
-	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
+	wasmPath := integrationWasm(t)
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
@@ -259,52 +251,52 @@ func TestTinyGoGuestCanBeStopped(t *testing.T) {
 	}
 }
 
-func buildTinyGoIntegrationGuest(t *testing.T) string {
+var (
+	intBuildOnce sync.Once
+	intWasmPath  string
+	intBuildErr  error
+)
+
+// integrationWasm compiles testdata/integration_guest with the standard Go
+// toolchain to a wasip1 Extism module — the same `go` that runs the tests. A
+// build failure is fatal, not a skip: these proofs run wherever `go` does.
+func integrationWasm(t *testing.T) string {
 	t.Helper()
-
-	wasmPath := filepath.Join(t.TempDir(), "integration_guest.wasm")
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(
-		ctx,
-		"tinygo",
-		"build",
-		"-target", "wasip1",
-		"-buildmode=c-shared",
-		"-tags", "tinygo",
-		"-o", wasmPath,
-		"./testdata/integration_guest",
-	)
-	cmd.Env = append(os.Environ(),
-		"XDG_CACHE_HOME="+t.TempDir(),
-		"GOCACHE="+filepath.Join(t.TempDir(), "go-build"),
-	)
-	out, err := cmd.CombinedOutput()
-	if ctx.Err() != nil {
-		t.Fatalf("build integration guest timed out: %v", ctx.Err())
+	intBuildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "integration-guest-")
+		if err != nil {
+			intBuildErr = err
+			return
+		}
+		out := filepath.Join(dir, "integration_guest.wasm")
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "go", "build", "-buildmode=c-shared", "-o", out, "./testdata/integration_guest")
+		cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			intBuildErr = errors.New("build integration guest: " + err.Error() + "\n" + strings.TrimSpace(string(b)))
+			return
+		}
+		intWasmPath = out
+	})
+	if intBuildErr != nil {
+		t.Fatalf("integration guest: %v", intBuildErr)
 	}
-	if err != nil {
-		t.Fatalf("build integration guest: %v\n%s", err, strings.TrimSpace(string(out)))
-	}
-	return wasmPath
+	return intWasmPath
 }
 
 // Kernel law #2 (determinism): two fresh processes running the ambient mode —
 // which reads the WASI clock and RNG the kernel pins — must observe identical
 // values. A crash-replay is exactly a fresh process re-running the same code,
 // so equality here is what makes un-journaled ambient reads safe.
-func TestTinyGoGuestAmbientReadsAreDeterministic(t *testing.T) {
+func TestGuestAmbientReadsAreDeterministic(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping TinyGo integration test in short mode")
-	}
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		t.Skip("tinygo not found")
+		t.Skip("skipping Wasm integration test in short mode")
 	}
 
 	ctx := context.Background()
-	wasmPath := buildTinyGoIntegrationGuest(t)
-	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
+	wasmPath := integrationWasm(t)
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
@@ -357,17 +349,14 @@ func TestTinyGoGuestAmbientReadsAreDeterministic(t *testing.T) {
 // through extism:host/env http_request — bypassing the syscall dispatcher —
 // must fail, because the kernel refuses images that set allowed_hosts and the
 // SDK denies requests when none are allowed.
-func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
+func TestGuestAmbientHTTPIsDenied(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping TinyGo integration test in short mode")
-	}
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		t.Skip("tinygo not found")
+		t.Skip("skipping Wasm integration test in short mode")
 	}
 
 	ctx := context.Background()
-	wasmPath := buildTinyGoIntegrationGuest(t)
-	program, err := capcompute.NewProgram[integrationPID](ctx, capcompute.Config{
+	wasmPath := integrationWasm(t)
+	program, err := capcompute.NewProgram(ctx, capcompute.Config{
 		Image: extism.Manifest{
 			Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}},
 		},
@@ -407,22 +396,19 @@ func TestTinyGoGuestAmbientHTTPIsDenied(t *testing.T) {
 	}
 }
 
-func TestTinyGoGuestResourceLimits(t *testing.T) {
+func TestGuestResourceLimits(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping TinyGo integration test in short mode")
-	}
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		t.Skip("tinygo not found")
+		t.Skip("skipping Wasm integration test in short mode")
 	}
 
 	ctx := context.Background()
-	wasmPath := buildTinyGoIntegrationGuest(t)
+	wasmPath := integrationWasm(t)
 
-	newProgram := func(t *testing.T, config capcompute.Config) *capcompute.Program[integrationPID] {
+	newProgram := func(t *testing.T, config capcompute.Config) *capcompute.Program {
 		t.Helper()
 		config.Image = extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: wasmPath}}}
 		config.PluginConfig = extism.PluginConfig{EnableWasi: true}
-		program, err := capcompute.NewProgram[integrationPID](ctx, config)
+		program, err := capcompute.NewProgram(ctx, config)
 		if err != nil {
 			t.Fatalf("new program: %v", err)
 		}
@@ -434,7 +420,7 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 		return program
 	}
 
-	resume := func(t *testing.T, program *capcompute.Program[integrationPID], mode string, timeout time.Duration) capcompute.ResumeResult {
+	resume := func(t *testing.T, program *capcompute.Program, mode string, timeout time.Duration) capcompute.ResumeResult {
 		t.Helper()
 		pid := integrationPID{id: "run-" + mode}
 		input, err := json.Marshal(struct {
@@ -473,7 +459,11 @@ func TestTinyGoGuestResourceLimits(t *testing.T) {
 
 	t.Run("memory cap traps the hog", func(t *testing.T) {
 		program := newProgram(t, capcompute.Config{
-			MaxMemoryPages: 256, // 16 MiB
+			// 64 MiB — above the standard-Go runtime's ~34 MiB minimum memory
+			// section (a cap below it is refused at load, before the guest
+			// runs) and far below the 4 GiB the hog mode asks for, so the
+			// growth still traps.
+			MaxMemoryPages: 1024,
 		})
 		result := resume(t, program, "hog", 0)
 		if result.Status != capcompute.ResumeFailed {

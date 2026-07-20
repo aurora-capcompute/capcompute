@@ -273,7 +273,7 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
 
 ---
 
-## ABI v3 — protobuf envelope — `DONE` (CHALLENGE E)
+## ABI v3 — protobuf envelope — `SUPERSEDED by v4` (CHALLENGE E)
 
 Decision recorded in CHALLENGE.md E: keep the uniform envelope (mediation
 uniformity — the seccomp/strace argument; wazero has no component model, so
@@ -282,25 +282,25 @@ record shape settles.
 
 - Shipped as a clean cut: `abi: 3`; host and both guests migrated together;
   the pre-v3 JSON wire is just garbage to the decoder (`invalid_args`).
-- **Deviation from the sketch, deliberate:** instead of vtprotobuf/prost
-  codegen in guests, the envelope codec is hand-rolled proto3 wire format
-  (`sys/wire`, ~200 dependency-free lines; mirrored in `aurora-brains sdk/src/wire.rs`).
-  This dissolves the TinyGo gate rather than passing it — no `protoreflect`
-  in any guest — and honors minimal-TCB. Interop is pinned three ways:
-  both-direction round-trips against protoc-generated reference code
-  (`sys/wire/internal/refpb`, regenerate with `protoc --go_out`), golden byte
-  fixtures shared verbatim between Go and Rust tests, and unknown-field
-  skipping (the schema-evolution contract). `envelope.proto` stays the
-  source of truth, so protovalidate/CEL and field annotations can adopt real
-  codegen later without a wire change.
-- **Journal records stay canonical JSON** — the wire and the store encoding
-  are separate concerns, and readable journals were the point of the
-  protojson caveat; store-side proto adoption rides the (blocked) runtime
-  migration if it ever pays.
-- Verified here: host round-trip + protoc interop (Go tests), Rust program
-  `cargo test` + release build for wasm32-wasip1. The Go program and the
-  integration guest share the host-tested codec and typecheck for wasip1;
-  their tinygo compile runs in CI (no tinygo in this container).
+- **Superseded by ABI v4 (2026-07-20): the envelope is JSON again.** v3's
+  hand-rolled proto3 codec (`sys/wire`, mirrored in `aurora-brains
+  sdk/src/wire.rs`) dodged the TinyGo gate but, in doing so, forfeited the
+  benefits that justified protobuf at all — protovalidate/CEL and field
+  annotations describe typed **args**, and args are opaque payloads by design,
+  so reaching them would have meant putting codegen back inside guests. What
+  was left was a second codec per language for the six fields
+  `sys.Syscall`/`sys.SyscallResult` already encode as JSON. v4 deletes both
+  codecs, the `.proto`, and its generated reference package, and lets the
+  `sys` types be the wire. See CHALLENGE.md finding E (amended).
+- **Journal records are canonical JSON, and now so is the wire** — v3 kept
+  them separate to protect audit legibility; v4 makes them the same encoding,
+  so the audit path is the wire read back.
+- Verified here: host round-trip and the guest-facing ABI boundary (Go tests
+  building real wasip1 guests with the standard toolchain), Rust program
+  `cargo test` + release build for wasm32-wasip1, and the Go-host/Rust-guest
+  end-to-end suite in `aurora-capcompute/internal/agent`. TinyGo is gone: the
+  integration guest builds with the same `go` that runs the tests, so its six
+  tests execute everywhere instead of skipping.
 
 ## Cross-cutting (do alongside, not as a milestone)
 
@@ -481,7 +481,8 @@ logs and journal headers do not fold. The guest ABI is unchanged (`agent.*`,
   `aurora-dist/internal/dist/store`).
 
 ## Recommended starting point
-Everything designed for these repos is `DONE` — M1 through M6, ABI v3, the
+Everything designed for these repos is `DONE` — M1 through M6, the ABI through
+v4 (v3's protobuf envelope tried and withdrawn; see CHALLENGE E), the
 runtime migration, and the distribution epoch through D2: the vocabulary cuts
 (D0.1–D0.4), the `aurora-dist` distribution, and the `aurora-cli` terminal.
 A 2026-07-19 charter pass then made the kernel library kernel-only: the

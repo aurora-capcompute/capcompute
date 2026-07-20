@@ -90,8 +90,8 @@ capability grants and information‑flow control — live in
 
 ## Quick start (5 minutes)
 
-**Prerequisites:** Go 1.26+. (Optional: [TinyGo](https://tinygo.org) to run the
-end‑to‑end guest tests — they auto‑skip if it's missing.)
+**Prerequisites:** Go 1.26+. Nothing else — the end‑to‑end guest tests build
+their Wasm fixtures with the same `go` that runs them.
 
 ```sh
 git clone https://github.com/aurora-capcompute/capcompute
@@ -112,17 +112,17 @@ GOCACHE=/tmp/capcompute-go-build go test ./...
 Run only the fast unit tests, or a single package:
 
 ```sh
-go test -short ./...                      # skip the slow TinyGo integration test
+go test -short ./...                      # skip the slow Wasm guest tests
 go test ./sys/replay/tape/journaled/      # one package
 ```
 
-If you have TinyGo installed, the integration test builds a real Wasm guest and
-drives it through completed / yielded / failed / crash‑replay states:
+The integration test builds a real Wasm guest and drives it through completed /
+yielded / failed / crash‑replay states:
 
 ```sh
-go test -run TestTinyGoGuest ./...
+go test -run TestGuest ./...
 # internally it builds the guest fixture with:
-#   tinygo build -target wasip1 -buildmode=c-shared -tags tinygo \
+#   GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared \
 #     -o guest.wasm ./testdata/integration_guest
 ```
 
@@ -200,8 +200,10 @@ A guest imports one host function and sends it a request:
 func hostSyscall(uint64) uint64
 ```
 
-The request and response are an **ABI‑v3 protobuf envelope** (`sys.ABIVersion == 3`;
-the wire codec lives in `sys/wire`). A response has one of three statuses:
+The request and response are an **ABI‑v4 JSON envelope** (`sys.ABIVersion == 4`):
+a `sys.Syscall` in, a `sys.SyscallResult` out — the same types, and the same
+JSON, that the dispatcher chain and the journal already speak. A response has
+one of three statuses:
 
 - `result` — the syscall completed and returned a value;
 - `yield` — the host needs outside work before the guest can continue;
@@ -231,9 +233,9 @@ processor.go     Program, Process, NewProcess, Resume — the processor
 host.go          the single Extism host function + syscall dispatch
 ambient.go       deterministic clock + RNG (so replay above is exact)
 sys/             the syscall vocabulary: Syscall, Dispatcher, Capability, errno
-  wire/          the ABI-v3 protobuf envelope codec (shared with guests)
+                 — and, via their JSON tags, the ABI-v4 wire envelope itself
 docs/            ARCHITECTURE.md (the OS model), PITCH.md, ROADMAP.md, …
-testdata/        the smallest TinyGo guest fixtures used by integration tests
+testdata/        the smallest Wasm guest fixtures used by integration tests
 ```
 
 ## Related repos
