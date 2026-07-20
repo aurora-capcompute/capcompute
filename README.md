@@ -23,7 +23,7 @@ delete a file. Three things immediately go wrong:
 3. **The agent guards its own gate.** "A human must approve deletes" lives in the
    agent's prompt — which the AI controls. The prisoner writes the prison rules.
 
-`capcompute` is the kernel those answers are built on:
+`capcompute` is the processor those answers are built on:
 
 - **Every side effect goes through one recorded gate** the program can't bypass —
   an un‑forgeable audit trail.
@@ -34,7 +34,7 @@ delete a file. Three things immediately go wrong:
 It's a **library, not an app** — you link it into your own Go program. Think of it
 as the "kernel" of a small operating system: Wasm modules are **programs**, running
 instances are **processes**, and host features (network, LLM calls, storage) are
-**syscalls** the kernel mediates. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+**syscalls** the processor mediates. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 for the full OS model.
 
 ## Where this fits in the Aurora system
@@ -54,7 +54,7 @@ AI agents safely:
  aurora-capcompute    aurora-dispatchers     ← orchestration runtime + capability drivers
    └──────────┬──────────┘
               │  both built on
-         capcompute                          ◀── YOU ARE HERE (the kernel)
+         capcompute                          ◀── YOU ARE HERE (the processor)
 
    aurora-brains  →  the agent "programs" (Wasm) that run inside
 ```
@@ -67,7 +67,7 @@ AI agents safely:
 - **[aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers)** —
   the concrete drivers that actually make HTTP calls, read files, call an LLM.
 - **[aurora-brains](https://github.com/aurora-capcompute/aurora-brains)** — the
-  Wasm agent programs (the "cognition") that run *as processes* inside this kernel.
+  Wasm agent programs (the "cognition") that run *as processes* inside this processor.
 - **[aurora-dist](https://github.com/aurora-capcompute/aurora-dist)** — bundles all
   of the above into one runnable server.
 
@@ -78,7 +78,7 @@ You rarely use `capcompute` on its own. It's the engine the rest is built from.
 | Feature | The problem it solves |
 | --- | --- |
 | **One syscall gate, zero ambient authority** — a program's only way to affect anything is the host syscall; no filesystem, no network, no env | Untrusted / LLM‑written code can't reach anything you didn't wire into its dispatcher |
-| **Deterministic execution** — the WASI clock and RNG are kernel‑pinned; a fresh instance observes the identical sequence | The layer above can rebuild a crashed process by replaying its journal to the exact instruction |
+| **Deterministic execution** — the WASI clock and RNG are processor‑pinned; a fresh instance observes the identical sequence | The layer above can rebuild a crashed process by replaying its journal to the exact instruction |
 | **Resource caps** — per‑process memory limit and resume deadline | A hostile or buggy guest can't exhaust the host or spin forever |
 | **Yield / resume** — a process can pause on outside work (an approval, a timer) and be resumed later | Human‑in‑the‑loop and long waits without holding a thread |
 
@@ -170,8 +170,9 @@ A host application uses three calls — `NewProgram`, `NewProcess`, `Resume`:
    ```
 
 `Resume` runs the guest in a goroutine and delivers exactly one
-`ResumeResult`; the process it planted in the call context is the one the
-syscall host function dispatches through — there is no other lookup.
+`ResumeResult`; the dispatch closure it planted in the call context — already
+bound to that process's credential and dispatcher — is what the syscall host
+function calls, so there is no other lookup.
 
 ### The one piece you provide
 
@@ -212,7 +213,7 @@ one of three statuses:
 
 The guest decides what to do with the response and returns from its exported
 function with `{"status":"completed"}` or `{"status":"yielded"}`. Some syscall
-names are reserved by the kernel: `sys.begin`, `sys.commit`, `sys.compensate`,
+names are reserved by the processor: `sys.begin`, `sys.commit`, `sys.compensate`,
 `sys.abort`, `sys.spawn`, `sys.timer`, `sys.declassify`, `sys.now`, `sys.random`.
 
 ## What this library deliberately does **not** own
@@ -223,7 +224,7 @@ product‑specific agent policy. Those belong to the system wrapping it — that
 what [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
 and [aurora-dist](https://github.com/aurora-capcompute/aurora-dist) are.
 The rule is visible in the tree: every `.go` file here is either consumed
-kernel API or a `_test.go` file — built‑ahead code with no consumer gets
+processor API or a `_test.go` file — built‑ahead code with no consumer gets
 removed (design kept in docs) until a consumer forces it back.
 
 ## Project layout
@@ -240,7 +241,7 @@ testdata/        the smallest Wasm guest fixtures used by integration tests
 
 ## Related repos
 
-- [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute) — the orchestration runtime built on this kernel
+- [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute) — the orchestration runtime built on this processor
 - [aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers) — the capability drivers
 - [aurora-brains](https://github.com/aurora-capcompute/aurora-brains) — the Wasm agent programs that run inside
 - [aurora-dist](https://github.com/aurora-capcompute/aurora-dist) — the runnable server that bundles it all

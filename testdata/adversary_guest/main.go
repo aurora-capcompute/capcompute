@@ -6,10 +6,10 @@
 // -buildmode=c-shared), so the adversarial proofs run in any environment that
 // already has `go` — no extra toolchain, no silent skip.
 //
-// Every mode attempts to break one of the two guarantees the kernel makes to
+// Every mode attempts to break one of the two guarantees the processor makes to
 // the host that embeds it:
 //
-//   - host isolation (kernel law #1): the guest must not be able to touch the
+//   - host isolation (law #1): the guest must not be able to touch the
 //     host filesystem, environment, args, or network. These modes report
 //     whether they "escaped"; the test asserts they never do.
 //   - the ABI trust boundary: the guest must not be able to forge the ABI
@@ -70,7 +70,7 @@ func run() int32 {
 			Abi: sys.ABIVersion, Name: "host.echo", Args: json.RawMessage(`{"v":1}`),
 		})
 
-	// ---- host isolation (kernel law #1) ----
+	// ---- host isolation (law #1) ----
 
 	case "fs_read":
 		// No WASI preopens are configured, so opening any host path must fail.
@@ -89,7 +89,7 @@ func run() int32 {
 
 	case "args":
 		// os.Args[0] is the module name; anything beyond it is host-supplied
-		// argv the kernel must not pass.
+		// argv the processor must not pass.
 		args := os.Args
 		out.Escaped = len(args) > 1
 		out.Detail = fmt.Sprintf("%d args", len(args))
@@ -116,7 +116,7 @@ func run() int32 {
 		// Bytes that are not an envelope in any encoding: rejected, never executed.
 		out.RStatus, out.Code = dispatchRaw([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
 
-	// ---- resource limits / host survival (kernel law #1) ----
+	// ---- resource limits / host survival (law #1) ----
 
 	case "dispatch_error":
 		// The driver returns a Go (infrastructure) error. The host must trap
@@ -143,10 +143,10 @@ func run() int32 {
 		}
 
 	case "ambient":
-		// Reads the WASI clock and RNG the kernel pins; two fresh processes
-		// must observe identical values (determinism, kernel law #2).
+		// Reads the WASI clock and RNG the processor pins; two fresh processes
+		// must observe identical values (determinism, law #2).
 		buf := make([]byte, 16)
-		// crypto/rand under wasip1 reads WASI random_get, which the kernel pins.
+		// crypto/rand under wasip1 reads WASI random_get, which the processor pins.
 		if _, err := crand.Read(buf); err != nil {
 			pdk.SetError(err)
 			return 1

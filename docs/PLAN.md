@@ -20,7 +20,7 @@ Read the other docs for *why*; this doc is *what, in what order, and done-when*.
 Kernel/OS rename; ABI v2 (`abi` field, `sys.Errno`, `sys.begin`/`sys.commit`);
 ambient lockdown (`ambient.go`, `ErrAmbientAuthority`); journal program-
 versioning (`journaled.Header`, `ReplayIncompatibleError`); `sys.Attenuate`;
-kernel-law tests (laws 1–2). Consumers migrated (the full runtime migration
+law tests (laws 1–2). Consumers migrated (the full runtime migration
 shipped later — see the crossover section and the distribution epoch).
 
 ---
@@ -52,7 +52,7 @@ Goal: the monitor validates *every* access. Closes the confused-deputy hole.
 Fully inside capcompute; no consumer break beyond a new decorator they opt into.
 
 - **M1.1 Grant-set + schema validation decorator** — `DONE` (`validate.go`)
-  A kernel-provided `sys.Dispatcher` decorator that, before delegating:
+  A processor-provided `sys.Dispatcher` decorator that, before delegating:
   (1) checks the cred's granted capability set contains `syscall.Name` →
   `FailCode(ErrnoDenied)`; (2) validates `syscall.Args` against the capability's
   `InputSchema` → `FailCode(ErrnoInvalidArgs)`.
@@ -74,7 +74,7 @@ steps now; aggregate quotas ride the M5 scheduler seam.
   Kernel sets a wazero memory-page limit on the instance and an optional
   per-`Resume` wall-clock deadline (derives a child context from the resume ctx;
   you already cancel on ctx). Config fields `MaxMemoryPages`, `ResumeTimeout`.
-  Files: `kernel.go` (`guestModuleConfig`/`RuntimeConfig` + `Resume`),
+  Files: `processor.go` (`guestModuleConfig`/`RuntimeConfig` + `Resume`),
   `ambient.go` if the limit belongs with source config; tests: OOM guest traps,
   infinite-loop guest is killed by deadline (extend existing "infinite" mode).
   DoD: a guest allocating past the cap traps as `ResumeFailed`; a guest past the
@@ -133,7 +133,7 @@ unwound. This is the durability heart and the biggest audit-story win. DST
   DoD: an aborted scope compensates completed effects newest-first; a
   cannot-compensate effect escalates; unwinding is itself in the journal.
 - **M3.3 Deterministic simulation testing harness** — `DONE` (`sim/`) (ROADMAP #14, CHALLENGE D)
-  A harness driving the kernel with a mock `ProcessTable` and a fault-injecting
+  A harness driving the processor with a mock `ProcessTable` and a fault-injecting
   dispatcher; script a crash at *every* journal position; assert M3.1/M3.2
   invariants across the matrix (replay convergence, effect idempotency, no
   orphaned intents, unwind correctness).
@@ -144,7 +144,7 @@ unwound. This is the durability heart and the biggest audit-story win. DST
 ## M4 — Data-flow security: information flow control  (CHALLENGE A)
 
 Goal: track *where values come from and may flow*, not just what may be called.
-The frontier bet; the biggest differentiator (CaMeL applied as a kernel
+The frontier bet; the biggest differentiator (CaMeL applied as a processor
 primitive). Staged so value lands before the deepest part.
 
 - **M4.1 Provenance labels on results** — `DONE` (`Capability.Labels`, `Labeler`) (ROADMAP #11a)
@@ -170,7 +170,7 @@ primitive). Staged so value lands before the deepest part.
   program in aurora-brains: quarantined planner, `$N` routing — ROADMAP #24)
   Trusted plan from the user prompt; quarantined processing of untrusted tool
   outputs with no tool access. The deepest robustness layer; a program-architecture
-  change in aurora-brains, not a kernel change. Spec in `ARCHITECTURE.md`; build
+  change in aurora-brains, not a processor change. Spec in `ARCHITECTURE.md`; build
   after M4.1–M4.3 prove the labelling substrate.
 
 ## M5 — The multiprocess future  (spawn, IPC, supervision)
@@ -193,7 +193,7 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   with LRU eviction and reactivation-by-replay; race-tested). The runtime
   adopted it, and the package then **moved to its consumer**
   (`aurora-capcompute/internal/sched`) — scheduling is runtime policy, not a
-  kernel primitive (the charter); the unused `KernelResume` binding was
+  processor primitive (the charter); the unused `KernelResume` binding was
   dropped in the move.
   Widen the app-owned scheduler into an interface with priority + admission
   hooks + virtual-actor activation/deactivation (bound resident memory; Orleans/
@@ -204,16 +204,16 @@ rename first (mechanical, unblocks everything), then spawn, then IPC.
   unconsumed** (the IPC razor): built as `spawn.go` — attenuation,
   idempotency-key child identity (stronger than the sketched spawn_seq),
   transitive yield, the `ChildRunner` seam — but the runtime serves
-  `sys.spawn` with its own router (manifest-carrying grants), so the kernel
+  `sys.spawn` with its own router (manifest-carrying grants), so the processor
   decorator had no caller. The name stays reserved; the decorator returns by
-  revert only if kernel-composed children are ever needed. (ROADMAP #5)
+  revert only if processor-composed children are ever needed. (ROADMAP #5)
   Kernel-provided decorator intercepting reserved `sys.SyscallSpawn`; delegates
   else. `spawn(program, input, capabilities)` with: capabilities enforced ⊑
   parent via `sys.Attenuate`; deterministic child PID `f(parentPID, spawnSeq,
   program)`; child gets its **own journal** keyed by child PID; child result
   committed into the parent's tape (replay re-finds, does not re-spawn); parent
   yields while child runs (child-workflow pattern). Host creation
-  (`capcompute.NewProcess`) stays a direct kernel API — the init/PID-0 exception.
+  (`capcompute.NewProcess`) stays a direct processor API — the init/PID-0 exception.
   App supplies a `DeriveCred(parent K, seq int, program string) K` seam.
   Files: new `capcompute/spawn.go`, `ARCHITECTURE.md` spawn section (transitive
   yield: parent's spawn yields when the child yields; resume re-enters the
@@ -246,7 +246,7 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
 - **M6.1 Tenant-scoped store capability** — `DONE` (`aurora-dispatchers/memory`, `core.memory` registration: tenant scoping, subtree chroot, approval-gated writes, replay re-read test)
   A `memory.get` / `memory.put` capability (file-flavoured `fs.*` also fine),
   implemented as a dispatcher/driver in `aurora-dispatchers` over a
-  tenant-scoped KV store. The two kernel laws fix its form:
+  tenant-scoped KV store. The two laws fix its form:
   (1) **determinism** — it goes *through* the journaled syscall path, so a read
   result is committed and replay re-reads the recorded value regardless of later
   mutations (identical to `internet.read`, the existing shared-mutable device);
@@ -318,7 +318,7 @@ record shape settles.
   with the runtime's approval machinery (out of scope here).
 
 ## k8s-agent / runtime crossover — `DONE` (runtime migration shipped)
-`aurora-capcompute` runs on the kernel head: Stack-assembled chains,
+`aurora-capcompute` runs on the processor head: Stack-assembled chains,
 hash-chained intent/completion journal over the event log (per-revision
 headers), open-intent durable tasks injecting the stored resolution as the
 dispatch Authorization, sys.begin/commit savepoint forking, and root runs as
@@ -341,7 +341,7 @@ repos; everything else is deprecated. Read this section as the successor to
 the milestone queue above: M1–M6 built the OS, this builds what ships it.
 
 **Surviving cores:**
-- `capcompute` — the kernel. Unchanged role.
+- `capcompute` — the processor. Unchanged role.
 - `aurora-capcompute` — the runtime. Unchanged role; D0 vocabulary below.
 - `aurora-dispatchers` — the driver library (domain driver modules —
   `-llm`/`-k8s`/`-helm` — migrate to `sys` and re-plug when needed).
@@ -404,7 +404,7 @@ upgrades follow the same story once D0.2 lands.
 - **D0.1 Vocabulary cut: `thread` → `session`, the cognition unit → `program`.**
   Session is the OS-correct term for the level that groups processes and is
   what a controlling terminal attaches to; "thread" inverted the metaphor
-  (OS threads live *inside* processes). Program finishes a rename the kernel
+  (OS threads live *inside* processes). Program finishes a rename the processor
   (`Header.Program`, `sys.spawn`) and assembly already made. API, internals,
   and wire (`session_id`, `program`, `ProgramDigest`, `ses_` id prefix, task
   scopes, event payload fields) — a clean cut; old event logs do not fold.
@@ -424,7 +424,7 @@ upgrades follow the same story once D0.2 lands.
 processes the way a terminal session does, and the thing a session groups was
 still called a "run". The scope hierarchy reads `tenant → session → process →
 revision`; a process pins a program digest; a revision is one incarnation of
-a process (the kernel keys instances by `pid@revision`, so a forked retry can
+a process (the processor keys instances by `pid@revision`, so a forked retry can
 never resume a stale instance). Kernel surface: `Stack.ForProcess`,
 `Taints.ForgetProcess`, `journaled.Header.Process`, `ProcessUnwoundError`.
 Runtime surface and wire: `CreateProcess`/`GetProcess`, `process_id`, `proc_`
@@ -485,7 +485,7 @@ Everything designed for these repos is `DONE` — M1 through M6, the ABI through
 v4 (v3's protobuf envelope tried and withdrawn; see CHALLENGE E), the
 runtime migration, and the distribution epoch through D2: the vocabulary cuts
 (D0.1–D0.4), the `aurora-dist` distribution, and the `aurora-cli` terminal.
-A 2026-07-19 charter pass then made the kernel library kernel-only: the
+A 2026-07-19 charter pass then made the processor library primitives-only: the
 scheduler moved to its consumer, and the unconsumed spawn decorator,
 supervisor, throttle, and OTel exporter were razored (designs kept above).
 Next up is **production hardening, not D3**: the 2026-07-05 refocus (ROADMAP
@@ -496,5 +496,5 @@ behind their return triggers. Standing
 deferrals, unchanged: **M2.3** CPU fuel waits on a wazero fuel mechanism;
 **M5.4** unforgeable capability references wait on evidence that
 authorized-by-cred is insufficient; **journal lifecycle** waits on real
-volume; the kernel-side `Spawner` returns by revert only if kernel-composed
+volume; the processor-side `Spawner` returns by revert only if processor-composed
 children are ever needed (`sys.spawn` itself is live in the runtime's router).

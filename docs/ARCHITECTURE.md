@@ -1,13 +1,21 @@
 ## What this is
 
 This document describes the OS model of the Aurora core: **capcompute** (the
-kernel — a processor that runs wasm programs deterministically behind one
+processor — it runs wasm programs deterministically behind one
 syscall gate) and the layers **aurora-capcompute** builds on it (`monitor/`,
 `replay/`, `journaled/` — the reference monitor, replay, and journal; moved
-there by the 2026-07-19 charter passes: the kernel library is
-kernel-primitives-only). Together they form a **library operating system** —
+there by the 2026-07-19 charter passes: the processor library is
+primitives-only). Together they form a **library operating system** —
 OS abstractions provided as Go libraries linked into a host application, not
 a standalone kernel on hardware. The system is:
+
+> **A note on "kernel".** The component is the **processor** — that is what
+> capcompute is, what the code calls it, and the word to use when naming the
+> thing that compiles programs, spawns processes, and serves syscalls. "Kernel"
+> is kept only for the *role* it plays in the OS model above, and for real
+> kernels this document compares against (seL4, KeyKOS, gVisor, microkernels).
+> It names no package, type, or file in this repo. If a sentence would still be
+> true with "capcompute" substituted in, the word you want is *processor*.
 
 - **capability-based** — guests have *zero ambient authority*; they can only invoke
   explicitly granted capabilities (lineage: seL4, KeyKOS);
@@ -46,7 +54,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
 | `Validator` / `FlowMonitor`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
 | `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
-| `sched.Scheduler` (aurora-capcompute) | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency — scheduling is runtime policy, so it lives above the kernel |
+| `sched.Scheduler` (aurora-capcompute) | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency — scheduling is runtime policy, so it lives above the processor |
 | `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, mount-scoped (`process` / `session` / `shared` spaces named by a separate `space` field — no tenant-wide scope, cross-tenant impossible), provenance-labelled, versioned (CAS) shared state |
 | `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | same operations as core.memory but a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
 
@@ -116,7 +124,7 @@ policy decorators (validation, approval, quotas) consume it.** A leaf driver
 reading `cred` to make an authority decision is a layering smell — that
 decision belongs in a decorator in front of it.
 
-## The five invariants (kernel laws)
+## The five invariants (laws)
 
 These must always hold. Encode them as tests/CI checks; they are what make the
 governance and durability claims *provable* rather than aspirational.
@@ -126,7 +134,7 @@ governance and durability claims *provable* rather than aspirational.
    WASI/host access "for convenience," enforcement degrades to advisory.)
    *Enforced in code:* `NewProgram` rejects images with `allowed_hosts`/
    `allowed_paths` (`ErrAmbientAuthority`); guest module config is
-   kernel-constructed, never caller-supplied (`ambient.go`).
+   processor-constructed, never caller-supplied (`ambient.go`).
 2. **Determinism.** Guests are deterministic; *all* non-determinism (clock,
    randomness, I/O) flows through syscalls. No wall-clock or RNG inside a guest.
    *Enforced in code:* the WASI clock and RNG a guest can reach are pinned to
@@ -154,7 +162,7 @@ governance and durability claims *provable* rather than aspirational.
    capability's declared `InputSchema` (malformed → `invalid_args`) before any
    driver sees it.
    The monitor also tracks **information flow** (the CaMeL architecture as
-   a kernel primitive): each granted operation declares the source classes its
+   a processor primitive): each granted operation declares the source classes its
    results carry (`labels`, e.g. `untrusted_web`) and the classes that may not
    flow into it (`taints`) — inline per-operation policy the driver enforces on
    each call, since it alone decodes which operation the call args select;
@@ -177,11 +185,11 @@ governance and durability claims *provable* rather than aspirational.
    drivers — encoded in `monitor.Stack.ForProcess`, so assembling a chain with a layer on the wrong side of the
    replay boundary is a construction you cannot express, not a rule you must
    remember. Reserved
-   markers (`sys.begin`/`sys.commit`) are exempt because they are kernel
+   markers (`sys.begin`/`sys.commit`) are exempt because they are processor
    control syscalls, not capabilities; `sys.declassify` is *not* exempt — it
    must be granted like any capability.
-5. **Minimal TCB.** The kernel owns lifecycle, syscall dispatch, and enforcement —
-   nothing else. Guard the boundary; helpers do not belong in the kernel.
+5. **Minimal TCB.** The processor owns lifecycle, syscall dispatch, and enforcement —
+   nothing else. Guard the boundary; helpers do not belong in the processor.
 
 ## Drivers: the symmetry
 
@@ -192,7 +200,7 @@ opposite ways* keeps the architecture coherent:
 - **Outbound drivers = dispatchers.** Called *by* a process as an outbound syscall
   (`process → device`): internet reads, k8s/Helm, `sys.timer`. The
   process initiates; the driver mediates access to a machine device.
-- **Inbound drivers = sources.** Drive processes *from outside* (`human → kernel →
+- **Inbound drivers = sources.** Drive processes *from outside* (`human → processor →
   process`): Telegram, Slack. The device on the other end is a **human**. A source
   fuses three classic roles — `getty` (accepts a "login" = a user starting a
   conversation), the **tty** (streams messages in/out), and the process's
@@ -240,20 +248,20 @@ Agents creating agents is the **`spawn` syscall**. Design decisions, with prior 
   cascade-kill vs orphan-adopt on parent `Stop`. Study Erlang/OTP supervision trees
   before this grows.
 
-**Status:** `sys.spawn` is live, served **above the kernel** by the runtime's
+**Status:** `sys.spawn` is live, served **above the processor** by the runtime's
 spawn router (its grant carries the manifests of the only programs the
-process may spawn — richer than name-list attenuation). A kernel-side
+process may spawn — richer than name-list attenuation). A processor-side
 `Spawner` decorator implementing the design here was built in parallel
 (attenuation via `monitor.Attenuate`, child cred derived from the spawn's
 idempotency key — strictly stronger than the sketched `spawn_seq`; transitive
 yield; a stopped child keeps the intent open), and **removed unconsumed** —
-the runtime's router is the spawner, so the kernel one had no caller. The
-name stays reserved; the decorator returns by revert only if kernel-composed
+the runtime's router is the spawner, so the processor one had no caller. The
+name stays reserved; the decorator returns by revert only if processor-composed
 children are ever needed.
 
-## Scheduling: above the kernel
+## Scheduling: above the processor
 
-Scheduling is runtime policy, not a kernel primitive: the kernel's whole
+Scheduling is runtime policy, not a processor primitive: the processor's whole
 contribution is `Resume` (one cooperative quantum). The fair-share scheduler —
 priority bands, per-owner quota backpressure, virtual-actor residency (the
 journal is the durable process, the instance is cache) — lives in
@@ -264,7 +272,7 @@ and removed unconsumed; their designs live in git and `ROADMAP.md`.
 ## Persistence and replay
 
 A process's *own* state has no filesystem: a process is durable because the
-kernel journals every syscall outcome; after a crash the kernel recreates the
+runtime journals every syscall outcome; after a crash the runtime recreates the
 process from its persisted program + input and **replays the journal** to the
 exact interruption point. The same append-only journal is the **audit trail** —
 every input, effect, capability grant, and approval decision, in order.
@@ -290,7 +298,7 @@ lives by *level*:
   facts, standing context). **This is the shared-data home**; without it,
   "data shared between sessions" has no principled place.
 
-Two kernel laws dictate the *form* the tenant store must take — it is not a
+Two laws dictate the *form* the tenant store must take — it is not a
 special case, it is a driver:
 
 1. **Determinism (law #2)** forbids ambient reads of shared mutable state (a

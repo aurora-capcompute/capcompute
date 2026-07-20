@@ -10,7 +10,7 @@ import (
 	extism "github.com/extism/go-sdk"
 )
 
-// Kernel law #1 (no ambient authority): images granting ambient network or
+// Law #1 (no ambient authority): images granting ambient network or
 // filesystem access are refused at program compilation.
 func TestNewProgramRejectsAmbientHosts(t *testing.T) {
 	_, err := NewProgram(context.Background(), Config{
@@ -30,7 +30,7 @@ func TestNewProgramRejectsAmbientPaths(t *testing.T) {
 	}
 }
 
-// Kernel law #1 (no ambient authority): the linear-memory cap is program-owned
+// Law #1 (no ambient authority): the linear-memory cap is program-owned
 // (Config.MaxMemoryPages). An image that also sets its own memory ceiling would
 // silently override it (the SDK applies the manifest value last), so such an
 // image is refused at compilation.
@@ -44,7 +44,7 @@ func TestNewProgramRejectsImageMemoryOverride(t *testing.T) {
 	}
 }
 
-// Kernel law #2 (determinism): the pinned WASI clock advances by a fixed step
+// Law #2 (determinism): the pinned WASI clock advances by a fixed step
 // from a fixed origin, and two fresh instances read the identical sequence — a
 // crash-replay is exactly a fresh instance, so un-journaled clock reads are safe.
 func TestDeterministicClockRestartsIdentically(t *testing.T) {
@@ -80,7 +80,7 @@ func TestDeterministicClockRestartsIdentically(t *testing.T) {
 	}
 }
 
-// Kernel law #2 (determinism) on the WARM-resume path: after a quantum has
+// Law #2 (determinism) on the WARM-resume path: after a quantum has
 // advanced the pinned sources, reset returns them to their origin, so the next
 // re-execution reads exactly the sequence a fresh (cold-replay) instance would.
 // Resume calls this before re-executing; without it a warm resume reads an
@@ -125,7 +125,7 @@ func TestAmbientResetRestoresColdReplaySequence(t *testing.T) {
 	}
 }
 
-// Kernel law #2 (determinism): the ambient sources the kernel pins must
+// Law #2 (determinism): the ambient sources the processor pins must
 // produce identical sequences on every fresh instance, so a crash-replay
 // observes exactly what the original run observed.
 func TestDeterministicRandRestartsIdentically(t *testing.T) {

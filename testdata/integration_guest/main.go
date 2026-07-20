@@ -105,9 +105,9 @@ func run() int32 {
 		pdk.SetErrorString(fmt.Sprintf("hog survived %d MiB", len(chunks)))
 		return 1
 
-	// ambient reads the WASI clock and RNG — the sources the kernel pins.
+	// ambient reads the WASI clock and RNG — the sources the processor pins.
 	// The host test runs this mode on two fresh processes and requires
-	// identical observations (kernel law #2: determinism).
+	// identical observations (law #2: determinism).
 	case "ambient":
 		buf := make([]byte, 16)
 		if _, err := rand.Read(buf); err != nil {
@@ -130,8 +130,8 @@ func run() int32 {
 		return 0
 
 	// http attempts ambient network through extism:host/env http_request,
-	// bypassing the syscall dispatcher. The kernel refuses images with
-	// allowed_hosts, so this must fail (kernel law #1: no ambient authority).
+	// bypassing the syscall dispatcher. The processor refuses images with
+	// allowed_hosts, so this must fail (law #1: no ambient authority).
 	case "http":
 		request := pdk.NewHTTPRequest(pdk.MethodGet, "https://example.com")
 		response := request.Send()

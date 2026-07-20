@@ -290,7 +290,7 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 	}
 	// A resume re-executes the entrypoint from the top on a possibly-warm
 	// instance; reset the pinned clock/RNG so the re-execution observes the same
-	// ambient sequence a cold replay would (kernel law #2). No quantum for this
+	// ambient sequence a cold replay would (law #2). No quantum for this
 	// process runs concurrently — state.start above serializes them — so this is
 	// safe to do before launching the run.
 	process.ambient.reset()

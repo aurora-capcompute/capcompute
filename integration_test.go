@@ -285,8 +285,8 @@ func integrationWasm(t *testing.T) string {
 	return intWasmPath
 }
 
-// Kernel law #2 (determinism): two fresh processes running the ambient mode —
-// which reads the WASI clock and RNG the kernel pins — must observe identical
+// Law #2 (determinism): two fresh processes running the ambient mode —
+// which reads the WASI clock and RNG the processor pins — must observe identical
 // values. A crash-replay is exactly a fresh process re-running the same code,
 // so equality here is what makes un-journaled ambient reads safe.
 func TestGuestAmbientReadsAreDeterministic(t *testing.T) {
@@ -345,9 +345,9 @@ func TestGuestAmbientReadsAreDeterministic(t *testing.T) {
 	}
 }
 
-// Kernel law #1 (no ambient authority): a guest attempting network access
+// Law #1 (no ambient authority): a guest attempting network access
 // through extism:host/env http_request — bypassing the syscall dispatcher —
-// must fail, because the kernel refuses images that set allowed_hosts and the
+// must fail, because the processor refuses images that set allowed_hosts and the
 // SDK denies requests when none are allowed.
 func TestGuestAmbientHTTPIsDenied(t *testing.T) {
 	if testing.Short() {

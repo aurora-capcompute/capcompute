@@ -26,7 +26,7 @@ processor: it runs programs deterministically and hands every syscall to the
 is the layer above's business.
 
 The rule is visible in the tree: every `.go` file here is either consumed
-kernel API or a `_test.go` file. Built-ahead code with no consumer gets
+processor API or a `_test.go` file. Built-ahead code with no consumer gets
 removed — the IPC razor — with its design kept in docs until a consumer
 forces it back.
 

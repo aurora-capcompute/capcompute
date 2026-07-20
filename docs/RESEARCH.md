@@ -19,7 +19,7 @@ laws they must uphold.
 
 ## 1. The ambient-authority surface is open — determinism holds by accident
 
-**Severity: this is the one finding that threatens the kernel laws.**
+**Severity: this is the one finding that threatens the laws.**
 
 **Today.** Every production call site enables full WASI and configures nothing
 else (`extism.PluginConfig{EnableWasi: true}`, no `AllowedHosts`, no
@@ -56,25 +56,25 @@ mode, no ambient namespaces exist; **CloudABI** — delete ambient POSIX
 entirely, everything arrives as a descriptor; **Fuchsia** — no ambient
 syscalls, all authority via handles. On the determinism side, **Determinator**
 (OSDI '10) and **dOS** (OSDI '10) established that determinism must be
-*enforced by the kernel*, not assumed of well-behaved programs; FoundationDB's
+*enforced by the processor*, not assumed of well-behaved programs; FoundationDB's
 simulation discipline and Antithesis re-taught the same lesson commercially.
 WASI preview1's ambient clocks/RNG are a known regression from its CloudABI
 ancestry — preview2 re-capabilizes them.
 
-**Verdict: adopt now (kernel change, small).** The kernel must *own* the guest
+**Verdict: adopt now (processor change, small).** The processor must *own* the guest
 source configuration rather than pass it through:
 
 1. In `NewKernel`/`CreateProcess`, construct the instance `ModuleConfig`
    internally: pin `WithRandSource` to a seed derived from the PID (or a
    journaled seed), pin walltime/nanotime to fixed or journaled sources, no
    env, no args. Ignore or reject a caller-supplied `ModuleConfig`.
-2. Validate the manifest at kernel construction: reject non-empty
+2. Validate the manifest at processor construction: reject non-empty
    `AllowedHosts` and `AllowedPaths` with a typed error. Guests that need HTTP
    or files get them as *capabilities* through the dispatcher — that is the
    whole point of the architecture.
 3. If real time/randomness is ever needed by a program, expose it as journaled
    syscalls (`sys.clock`, `sys.random`) — Temporal's `workflow.Now` rule.
-4. Add kernel-law tests (ROADMAP #2): a grantless guest must fail to reach
+4. Add law tests (ROADMAP #2): a grantless guest must fail to reach
    HTTP/FS; clock/RNG reads must be identical across a crash-replay.
 
 ---
@@ -204,7 +204,7 @@ alongside the ABI version field so it is one wire change.
 - **The program's actions-array protocol** — batched submissions with aggregated
   completions is the io_uring shape, already discovered at the protocol layer.
   The boundary is in-process, so there is no crossing cost to amortize; do
-  *not* move batching into the kernel ABI (non-goals).
+  *not* move batching into the syscall ABI (non-goals).
 
 ## 8. The journal is write-behind with respect to the world — adopt intent records
 
@@ -270,7 +270,7 @@ idempotent contents — which nothing enforces.
   should require the finding-8 idempotency floor (flag brackets over
   non-idempotent, un-keyed effects).
 - Add declared **compensation to `sys.Capability`** (the inverse syscall, or
-  an explicit cannot-compensate marker). The kernel gains **saga unwinding**:
+  an explicit cannot-compensate marker). The processor gains **saga unwinding**:
   on abort of a scope, dispatch completed effects' compensations in reverse —
   each journaled, audit-visible, and composable with approval (compensating an
   approved action can itself require approval).
@@ -281,7 +281,7 @@ idempotent contents — which nothing enforces.
   compensation ladder is escalation with the journal of what happened — make
   it a first-class outcome, not an implicit failure.
 
-Strategic note: kernel-level, capability-declared compensation with governed
+Strategic note: processor-level, capability-declared compensation with governed
 unwinding exists in the literature only as patterns and papers (SagaLLM is not
 a runtime). This layer is genuinely near the frontier.
 

@@ -7,8 +7,8 @@ package capcompute_test
 //
 // Two properties are proven through the real seams, not decorator doubles:
 //
-//   - Host isolation (kernel law #1): a guest driven through the real kernel
-//     host function cannot read/write the host filesystem, read host env/args,
+//   - Host isolation (law #1): a guest driven through the real host
+//     function cannot read/write the host filesystem, read host env/args,
 //     reach the network, exhaust host memory, spin forever, or crash the host
 //     by forcing a dispatcher error.
 //   - The ABI trust boundary: a forged ABI version and non-envelope bytes are
@@ -177,7 +177,7 @@ func completed(t *testing.T, mode string, s advSetup) *advReport {
 }
 
 // ===========================================================================
-// Host isolation (kernel law #1) — a hostile guest cannot touch the host.
+// Host isolation (law #1) — a hostile guest cannot touch the host.
 // ===========================================================================
 
 func TestAdversaryCannotEscapeToHost(t *testing.T) {
@@ -212,7 +212,7 @@ func TestAdversaryCannotEscapeToHost(t *testing.T) {
 	}
 }
 
-// A guest that allocates far past the kernel's memory cap must trap into a
+// A guest that allocates far past the processor's memory cap must trap into a
 // failed resume, never OOM the host.
 func TestAdversaryMemoryHogIsTrapped(t *testing.T) {
 	if testing.Short() {
@@ -246,7 +246,7 @@ func TestAdversaryInfiniteLoopIsStopped(t *testing.T) {
 
 // A dispatcher (infrastructure) error must trap the quantum — the guest never
 // observes an unjournaled outcome — and, crucially, the host survives: a fresh
-// process on the same kernel still runs.
+// process on the same processor still runs.
 func TestAdversaryDispatchErrorDoesNotCrashHost(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping guest-build test in short mode")
@@ -290,8 +290,8 @@ func TestAdversaryDispatchErrorDoesNotCrashHost(t *testing.T) {
 	}
 }
 
-// Two fresh processes reading the WASI clock/RNG the kernel pins must observe
-// identical values — a crash-replay is exactly a fresh process (kernel law #2).
+// Two fresh processes reading the WASI clock/RNG the processor pins must observe
+// identical values — a crash-replay is exactly a fresh process (law #2).
 func TestAdversaryAmbientReadsAreDeterministic(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping guest-build test in short mode")
@@ -304,7 +304,7 @@ func TestAdversaryAmbientReadsAreDeterministic(t *testing.T) {
 }
 
 // ===========================================================================
-// Complete mediation (kernel law #4) — proven through the real Stack chain,
+// Complete mediation (law #4) — proven through the real Stack chain,
 // observed by the guest across the trap boundary.
 // ===========================================================================
 

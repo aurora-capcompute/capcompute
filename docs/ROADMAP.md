@@ -119,17 +119,17 @@ manifest files in aurora-dist.
 
 > File references below predate the 2026-07-19 charter passes: the monitor,
 > replay, journal, scheduler, and DST harness now live in aurora-capcompute
-> (`monitor/`, `replay/`, `journaled/`, `internal/sched/`, `sim/`). The kernel
-> library keeps the process/kernel core, `sys`, and the wire codec.
+> (`monitor/`, `replay/`, `journaled/`, `internal/sched/`, `sim/`). The processor
+> library keeps the process core and `sys`.
 
 | # | Item | Status |
 |---|------|--------|
-| 0 | Ambient-surface lockdown (kernel owns guest WASI sources) | **done** (`ambient.go`, `ErrAmbientAuthority`) |
+| 0 | Ambient-surface lockdown (the processor owns guest WASI sources) | **done** (`ambient.go`, `ErrAmbientAuthority`) |
 | 1 | Journal program-versioning + replay compatibility check | **done** (`journaled.Header`, `ReplayIncompatibleError`) |
-| 2 | Kernel-law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the rollback matrices and runtime tests cover the rest in practice |
+| 2 | Law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the rollback matrices and runtime tests cover the rest in practice |
 | 3 | Hash-chained journal (tamper-evident audit) | **done** (`prev_hash`, `journaled.Verify`) |
 | 4 | Capability attenuation helper | **done** (now `monitor.Attenuate` — moved with the reference monitor) |
-| 5 | `process.spawn` syscall (sync-first child processes) | **done** — served by the runtime's spawn router; the kernel's parallel `Spawner` decorator was removed unconsumed |
+| 5 | `process.spawn` syscall (sync-first child processes) | **done** — served by the runtime's spawn router; the processor's parallel `Spawner` decorator was removed unconsumed |
 | 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape, idempotency keys) |
 | 10 | Guest-registered compensation + abort-retry | **done** (see §10 below — the full rollback semantics) |
@@ -199,7 +199,7 @@ that rollback leaves no journal trace at all.
 
 Sagas have no isolation (García-Molina & Salem '87; Richardson's
 countermeasures: semantic lock, pending state). The resolution: Try-Confirm/
-Cancel needs **no kernel feature and no driver** — it is a usage pattern of
+Cancel needs **no processor feature and no driver** — it is a usage pattern of
 the primitives §10 already guarantees, because the pending state belongs to
 the *participant*, not the orchestrator. In Pardon & Pautasso's RESTful TCC
 the hold is a resource on the service that owns it; the coordinator only

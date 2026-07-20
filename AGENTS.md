@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repo is the experimental Extism compute runtime — the kernel of a small
+This repo is the experimental Extism compute runtime — the processor of a small
 library operating system (see `docs/ARCHITECTURE.md` for the OS model and its
 invariants).
 

@@ -6,7 +6,7 @@ import (
 	"sort"
 )
 
-// ABIVersion is the syscall wire version this kernel speaks. Guests declare
+// ABIVersion is the syscall wire version this processor speaks. Guests declare
 // it on every Syscall; the host rejects mismatches with ErrnoBadABI. Since
 // v4 the wire encoding is JSON — a Syscall in, a SyscallResult out — so the
 // JSON tags on these types are the wire, the journal, and the audit
@@ -35,7 +35,7 @@ const (
 	SyscallAbort      = "sys.abort"
 	// SyscallSpawn creates a child process (sync-first: the parent's quantum
 	// runs the child; a yielding child yields the parent transitively). The
-	// kernel reserves the name but ships no spawner; it is served above — the
+	// processor reserves the name but ships no spawner; it is served above — the
 	// runtime's spawn router, whose grant carries the manifests of the only
 	// programs the process may spawn.
 	SyscallSpawn = "sys.spawn"
@@ -47,11 +47,11 @@ const (
 	SyscallTimer = "sys.timer"
 	// SyscallDeclassify moves labels out of the process's taint — an explicit,
 	// human-approved crossing of a label boundary (DIFC declassification).
-	// The kernel's Declassifier decorator serves it below the replay layer
+	// The runtime's Declassifier decorator serves it below the replay layer
 	// (the approved crossing is journaled); the FlowMonitor above applies
 	// the taint removal when the result passes through, fresh or replayed.
 	SyscallDeclassify = "sys.declassify"
-	// SyscallNow and SyscallRandom are the journaled world sources: the kernel
+	// SyscallNow and SyscallRandom are the journaled world sources: the processor
 	// pins the guest's ambient clock and RNG for determinism, so real time and
 	// entropy are capabilities instead — produced host-side on first execution,
 	// journaled like any completion, and replayed verbatim (the Temporal

@@ -8,14 +8,15 @@ import (
 
 // SyscallLabelPrefix namespaces the automatic provenance the Labeler stamps on
 // every result ("syscall:<name>"). It is reserved: a manifest may not declare a
-// label in this namespace, or a grant could forge the kernel's own provenance.
+// label in this namespace, or a grant could forge the provenance the Labeler
+// itself stamps.
 const SyscallLabelPrefix = "syscall:"
 
 // NormalizeLabels canonicalizes a declared label set (a capability's source
 // classes, or the sink labels it forbids): trim, drop empties, de-duplicate,
 // and sort so journal digests are deterministic. A label in the reserved
-// SyscallLabelPrefix namespace is rejected — that provenance is the kernel's to
-// stamp, never the manifest's to claim. An empty set normalizes to nil. `what`
+// SyscallLabelPrefix namespace is rejected — that provenance is the Labeler's
+// to stamp, never the manifest's to claim. An empty set normalizes to nil. `what`
 // names the field for the error message ("labels", "taints").
 func NormalizeLabels(what string, labels []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(labels))
@@ -44,7 +45,7 @@ func NormalizeLabels(what string, labels []string) ([]string, error) {
 // BlockedBy returns the sorted intersection of a call's forbidden labels and the
 // process's accumulated taint (Taint) — the labels a self-classifying driver
 // must refuse to let flow into this operation. Empty means the sink is clear.
-// A driver checks this before its side effect; the kernel FlowMonitor performs
+// A driver checks this before its side effect; the runtime's FlowMonitor performs
 // the same check for any capability-wide Forbid it declares.
 func BlockedBy(taint, forbid []string) []string {
 	if len(taint) == 0 || len(forbid) == 0 {

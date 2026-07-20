@@ -83,7 +83,7 @@ explicit privileged operation**.
 
 This is the item most worth doing: it converts "we gate actions" into "we track
 and gate *data flow* across actions" — the actual frontier, and no agent runtime
-ships it as a kernel primitive. New ROADMAP #11.
+ships it as a processor primitive. New ROADMAP #11.
 
 ## B. No resource management — the missing half of "operating system"
 
@@ -139,18 +139,18 @@ unvalidated args, a driver executes attacker-shaped input. Saltzer & Schroeder's
 **State of the art.** Complete mediation (Saltzer & Schroeder 1975); schema
 validation at the trust boundary (every serious RPC framework validates against
 the declared contract before dispatch); capability possession checked by the
-kernel, not asserted by the caller.
+processor, not asserted by the caller.
 
-**Plan (cheap, high-value).** Provide a kernel-side **validating decorator**:
+**Plan (cheap, high-value).** Provide a processor-side **validating decorator**:
 before delegating, (1) check `cred`'s grant set contains `syscall.Name` (fail
 `ErrnoDenied`), and (2) validate `syscall.Args` against the capability's
 `InputSchema` (fail `ErrnoInvalidArgs`). Make it a first-class piece of the
 chain so no app can forget it. This is the "reference monitor validates its
 inputs" law, enforced in code. New ROADMAP #13.
 
-## D. Determinism is a kernel law — but unused for testing (no DST)
+## D. Determinism is a law — but unused for testing (no DST)
 
-**What it is.** Determinism is enforced (`ambient.go`, kernel law #2) yet tests
+**What it is.** Determinism is enforced (`ambient.go`, law #2) yet tests
 are conventional unit/integration. The entire *point* of paying the determinism
 tax is that it **enables** deterministic simulation testing — and that payoff is
 left on the table.
@@ -169,7 +169,7 @@ message reordering), drive a deterministic scheduler, and assert invariants
 (replay convergence, effect idempotency, no orphaned intents) across the whole
 fault matrix.
 
-**Plan.** A simulation harness driving the kernel with a mock `ProcessTable`
+**Plan.** A simulation harness driving the processor with a mock `ProcessTable`
 and a fault-injecting dispatcher; script crashes at *every* journal position;
 assert the finding-8/9 invariants hold across the matrix. Few agent runtimes can
 DST because few are deterministic — this is both a robustness multiplier and a
@@ -178,7 +178,7 @@ differentiator. New ROADMAP #14.
 ## E. The JSON envelope ABI — DECIDED: deliberate trade, validated (ADR)
 
 **Decision (recorded 2026-07).** The uniform JSON envelope is kept **by
-design**; WIT/component-model is rejected for this kernel; **protobuf is the
+design**; WIT/component-model is rejected for this processor; **protobuf is the
 designated successor encoding as ABI v3**, after M3.1/M4.1 settle the record
 shape. Rationale below — do not relitigate without new facts.
 
@@ -338,7 +338,7 @@ spawn forces it.
 was prototyped and removed first — never wired, dead weight. Spawn and
 supervision shipped (`spawn.go`, `sched/supervisor.go`), then followed in the
 2026-07-19 charter pass: the runtime serves `sys.spawn` with its own router,
-so the kernel's parallel decorator (and the supervisor beside it) had no
+so the processor's parallel decorator (and the supervisor beside it) had no
 caller and were removed unconsumed — the name stays reserved and the design
 stands in `ARCHITECTURE.md`. Cross-process data sharing is an explicit granted channel
 (`core.memory`), not ambient message passing; finding J's revisit trigger

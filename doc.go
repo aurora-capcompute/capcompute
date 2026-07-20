@@ -1,8 +1,14 @@
-// Package capcompute is the kernel of a small library operating system for
-// Extism compute guests: wasm programs run as processes whose only access to
-// the outside world is host-dispatched syscalls.
+// Package capcompute is the processor: it runs Extism wasm programs as
+// processes whose only access to the outside world is host-dispatched
+// syscalls.
 //
-// The package is a processor — three calls:
+// A note on vocabulary, because two words are in play. The component is the
+// **processor** — that is what this package is, and the name the code uses
+// throughout. "Kernel" appears in the design docs as the processor's *role*
+// in the library-operating-system model (docs/ARCHITECTURE.md), alongside
+// programs, processes, and syscalls. It names no package, type, or file here.
+//
+// Three calls:
 //   - NewProgram compiles a program image, rejecting any ambient authority
 //     (no allowed hosts or paths; clock, RNG, and env are pinned by the
 //     processor, never caller-supplied);
@@ -12,9 +18,10 @@
 //   - Resume gives a process the CPU for one cooperative quantum, until it
 //     completes, yields, fails, or is stopped.
 //
-// Resume plants the process in the call context, so the syscall host
-// function dispatches through exactly the process that was given the CPU —
-// there is no other lookup.
+// Resume plants a dispatch closure — already bound to the process's
+// credential and dispatcher — in the call context, so the syscall host
+// function serves exactly the process that was given the CPU and needs no
+// lookup of its own.
 //
 // Resume has four observable outcomes. A successful guest call whose JSON
 // output contains {"status":"yielded"} returns ResumeYielded, while an explicit

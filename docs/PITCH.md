@@ -94,7 +94,7 @@ share its replay model." Then the delta:
   authority. Aurora executes **untrusted, LLM-steered code** in a sandbox with
   zero ambient authority — the threat model Temporal doesn't have.
 - Capability grants, per-call human approval, and argument/flow policy are
-  kernel primitives here; on Temporal you'd hand-build all three inside trusted
+  processor primitives here; on Temporal you'd hand-build all three inside trusted
   code the agent influences.
 - Same lineage, different trust boundary: "Temporal for code you trust; this
   for code you can't."
@@ -144,7 +144,7 @@ tainted data — so results carry provenance labels, the gate enforces flow
 policy (tainted data cannot reach a protected capability), declassification is
 an explicit human-approved syscall, and the plan/execute (dual-LLM) camel
 program quarantines untrusted tool output from planning. This is the CaMeL
-architecture as kernel primitives — the deterministic mediator CaMeL needs is
+architecture as processor primitives — the deterministic mediator CaMeL needs is
 what the dispatcher already is. Stay honest about the residual: flow policy
 bounds where tainted data can *go*; inside those bounds a fooled model can
 still act badly — which is what approval gates and the audit trail are for.
