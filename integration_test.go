@@ -103,7 +103,7 @@ func TestGuestResumeStates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resume: %v", err)
 			}
-			result := <-handle.Results()
+			result := <-handle.Results
 			if result.Status != tt.want {
 				t.Fatalf("status = %s, want %s; err = %v; output = %s", result.Status, tt.want, result.Err, result.Output)
 			}
@@ -162,7 +162,7 @@ func TestGuestNeverObservesInfrastructureErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	result := <-handle.Results()
+	result := <-handle.Results
 	if result.Status != capcompute.ResumeFailed {
 		t.Fatalf("status = %s (output %s), want failed — the guest observed an unjournaled outcome", result.Status, result.Output)
 	}
@@ -227,10 +227,10 @@ func TestGuestCanBeStopped(t *testing.T) {
 		t.Fatalf("concurrent resume error = %v, want ErrProcessActive", err)
 	}
 
-	handle.Stop()
-	handle.Stop()
+	handle.Cancel()
+	handle.Cancel()
 
-	results := handle.Results()
+	results := handle.Results
 	select {
 	case result := <-results:
 		if result.Status != capcompute.ResumeStopped {
@@ -331,7 +331,7 @@ func TestGuestAmbientReadsAreDeterministic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resume: %v", err)
 		}
-		result := <-handle.Results()
+		result := <-handle.Results
 		if result.Status != capcompute.ResumeCompleted {
 			t.Fatalf("status = %s; err = %v; output = %s", result.Status, result.Err, result.Output)
 		}
@@ -390,7 +390,7 @@ func TestGuestAmbientHTTPIsDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	result := <-handle.Results()
+	result := <-handle.Results
 	if result.Status != capcompute.ResumeFailed {
 		t.Fatalf("ambient http produced status %s (output %s); want failed", result.Status, result.Output)
 	}
@@ -449,7 +449,7 @@ func TestGuestResourceLimits(t *testing.T) {
 			t.Fatalf("resume: %v", err)
 		}
 		select {
-		case result := <-handle.Results():
+		case result := <-handle.Results:
 			return result
 		case <-time.After(30 * time.Second):
 			t.Fatal("resume did not return")

@@ -83,7 +83,7 @@ You rarely use `capcompute` on its own. It's the engine the rest is built from.
 | **Yield / resume** — a process can pause on outside work (an approval, a timer) and be resumed later | Human‑in‑the‑loop and long waits without holding a thread |
 
 The governed‑execution features built *on* this gate — the recorded
-hash‑chained journal, exactly‑once replay, savepoints and compensation,
+hash‑chained journal, exactly‑once replay, savepoints,
 capability grants and information‑flow control — live in
 [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
 (its `monitor`, `replay`, and `journaled` packages).
@@ -213,8 +213,8 @@ one of three statuses:
 
 The guest decides what to do with the response and returns from its exported
 function with `{"status":"completed"}` or `{"status":"yielded"}`. Some syscall
-names are reserved by the processor: `sys.begin`, `sys.commit`, `sys.compensate`,
-`sys.abort`, `sys.spawn`, `sys.timer`, `sys.declassify`, `sys.now`, `sys.random`.
+names are reserved by the processor: `sys.begin`, `sys.commit`, `sys.abort`,
+`sys.spawn`, `sys.timer`, `sys.declassify`, `sys.now`, `sys.random`.
 
 ## What this library deliberately does **not** own
 

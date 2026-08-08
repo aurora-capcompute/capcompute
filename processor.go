@@ -290,6 +290,16 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 		pluginCtx := context.WithValue(callCtx, syscallContextKey{}, dispatch)
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
+		// A cancelled or timed-out call is stopped, not failed: the wazero error
+		// it comes back with describes the module being closed, which says
+		// nothing about the guest's work. Cancel() and the quantum deadline both
+		// land here, since both are callCtx.
+		stopped := callCtx.Err() != nil
+		process.state.finish(stopped)
+		if stopped {
+			handle.Results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: callCtx.Err()}
+			return
+		}
 		if err != nil {
 			handle.Results <- ResumeResult{Status: ResumeFailed, Exit: exit, Err: err}
 			return

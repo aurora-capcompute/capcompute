@@ -151,7 +151,7 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 		t.Fatalf("resume: %v", err)
 	}
 	select {
-	case result := <-handle.Results():
+	case result := <-handle.Results:
 		if result.Status != capcompute.ResumeCompleted {
 			return result, nil
 		}
@@ -276,7 +276,7 @@ func TestAdversaryDispatchErrorDoesNotCrashHost(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resume %s: %v", mode, err)
 		}
-		return <-handle.Results()
+		return <-handle.Results
 	}
 
 	// The guest forces a dispatcher error; the quantum traps.
