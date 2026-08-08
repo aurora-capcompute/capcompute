@@ -21,43 +21,17 @@ const ABIVersion = 4
 // the outermost unclosed Begin so the whole declared unit re-executes.
 // Brackets follow stack semantics: a Commit closes the most recent open Begin.
 const (
-	SyscallBegin  = "sys.begin"
-	SyscallCommit = "sys.commit"
-	// SyscallCompensate registers a deferred inverse for the open section —
-	// journaled with concrete args, executed only if the revision is later
-	// abandoned. SyscallAbort is the guest's own abandonment: it ends the
-	// section with a rollback instead of a commit — the registered inverses
-	// run newest-first, then the section retries or the process finishes.
-	// Both are served by the runtime's lifecycle layer. The tape never
-	// interprets these names: a journal's rollback is marked by its
-	// compensation section, not by any particular call.
-	SyscallCompensate = "sys.compensate"
+	SyscallBegin      = "sys.begin"
+	SyscallCommit     = "sys.commit"
+	SyscallInput      = "sys.input"
+	SyscallOutput     = "sys.output"
+	SyscallLog        = "sys.log"
 	SyscallAbort      = "sys.abort"
-	// SyscallSpawn creates a child process (sync-first: the parent's quantum
-	// runs the child; a yielding child yields the parent transitively). The
-	// processor reserves the name but ships no spawner; it is served above — the
-	// runtime's spawn router, whose grant carries the manifests of the only
-	// programs the process may spawn.
-	SyscallSpawn = "sys.spawn"
-	// SyscallTimer schedules a relative timer. The runtime's timer layer
-	// serves it below the task layer: a valid call yields a durable task the
-	// application's scheduler fires when the duration elapses, resuming the
-	// process from the same point. It lives in sys because the runtime itself
-	// leans on it — abort-retry parks are timer tasks the runtime authors.
-	SyscallTimer = "sys.timer"
-	// SyscallDeclassify moves labels out of the process's taint — an explicit,
-	// human-approved crossing of a label boundary (DIFC declassification).
-	// The runtime's Declassifier decorator serves it below the replay layer
-	// (the approved crossing is journaled); the FlowMonitor above applies
-	// the taint removal when the result passes through, fresh or replayed.
+	SyscallSpawn      = "sys.spawn"
+	SyscallTimer      = "sys.timer"
 	SyscallDeclassify = "sys.declassify"
-	// SyscallNow and SyscallRandom are the journaled world sources: the processor
-	// pins the guest's ambient clock and RNG for determinism, so real time and
-	// entropy are capabilities instead — produced host-side on first execution,
-	// journaled like any completion, and replayed verbatim (the Temporal
-	// workflow.Now / SideEffect pattern).
-	SyscallNow    = "sys.now"
-	SyscallRandom = "sys.random"
+	SyscallNow        = "sys.now"
+	SyscallRandom     = "sys.random"
 )
 
 // Syscall is the guest-to-host request crossing the syscall boundary.

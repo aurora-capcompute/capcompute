@@ -222,36 +222,8 @@ type ResumeResult struct {
 
 // ResumeHandle controls one active guest invocation.
 type ResumeHandle struct {
-	results chan ResumeResult
-	cancel  context.CancelFunc
-
-	mu            sync.Mutex
-	finished      bool
-	stopRequested bool
-}
-
-// Results returns the channel that receives exactly one result before closing.
-func (h *ResumeHandle) Results() <-chan ResumeResult {
-	if h == nil {
-		return nil
-	}
-	return h.results
-}
-
-// Stop interrupts this invocation. It is safe to call Stop more than once.
-func (h *ResumeHandle) Stop() {
-	if h == nil {
-		return
-	}
-	h.mu.Lock()
-	if h.finished {
-		h.mu.Unlock()
-		return
-	}
-	h.stopRequested = true
-	cancel := h.cancel
-	h.mu.Unlock()
-	cancel()
+	Results chan ResumeResult
+	Cancel  context.CancelFunc
 }
 
 // NewProcess instantiates a fresh process from the program image —
@@ -312,30 +284,12 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 		defer cancel()
 		defer close(handle.results)
 
-		// Bind this process's credential and dispatcher into one closure: the
-		// host function needs nothing else, so the syscall path carries no
-		// process and stays free of the credential type.
 		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
 			return process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
 		})
 		pluginCtx := context.WithValue(callCtx, syscallContextKey{}, dispatch)
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
-		handle.mu.Lock()
-		stopped := handle.stopRequested || callCtx.Err() != nil
-		handle.finished = true
-		handle.mu.Unlock()
-
-		process.state.finish(stopped)
-
-		if stopped {
-			stopErr := callCtx.Err()
-			if stopErr == nil {
-				stopErr = context.Canceled
-			}
-			handle.results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: stopErr}
-			return
-		}
 		if err != nil {
 			handle.results <- ResumeResult{Status: ResumeFailed, Exit: exit, Err: err}
 			return
