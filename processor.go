@@ -277,12 +277,12 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 		callCtx, cancel = context.WithCancel(ctx)
 	}
 	handle := &ResumeHandle{
-		results: make(chan ResumeResult, 1),
-		cancel:  cancel,
+		Results: make(chan ResumeResult, 1),
+		Cancel:  cancel,
 	}
 	go func() {
 		defer cancel()
-		defer close(handle.results)
+		defer close(handle.Results)
 
 		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
 			return process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
@@ -291,12 +291,12 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
 		if err != nil {
-			handle.results <- ResumeResult{Status: ResumeFailed, Exit: exit, Err: err}
+			handle.Results <- ResumeResult{Status: ResumeFailed, Exit: exit, Err: err}
 			return
 		}
 		status, statusErr := resumeStatus(output)
 		if statusErr != nil {
-			handle.results <- ResumeResult{
+			handle.Results <- ResumeResult{
 				Status: ResumeFailed,
 				Output: append(json.RawMessage(nil), output...),
 				Exit:   exit,
@@ -305,14 +305,14 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 			return
 		}
 		if status == ResumeYielded {
-			handle.results <- ResumeResult{
+			handle.Results <- ResumeResult{
 				Status: ResumeYielded,
 				Output: append(json.RawMessage(nil), output...),
 				Exit:   exit,
 			}
 			return
 		}
-		handle.results <- ResumeResult{
+		handle.Results <- ResumeResult{
 			Status: ResumeCompleted,
 			Output: append(json.RawMessage(nil), output...),
 			Exit:   exit,
