@@ -223,7 +223,6 @@ type ResumeResult struct {
 // ResumeHandle controls one active guest invocation.
 type ResumeHandle struct {
 	Results chan ResumeResult
-	Cancel  context.CancelFunc
 }
 
 // NewProcess instantiates a fresh process from the program image —
@@ -267,37 +266,22 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 	// safe to do before launching the run.
 	process.ambient.reset()
 
-	var (
-		callCtx context.Context
-		cancel  context.CancelFunc
-	)
-	if process.timeout > 0 {
-		callCtx, cancel = context.WithTimeout(ctx, process.timeout)
-	} else {
-		callCtx, cancel = context.WithCancel(ctx)
-	}
 	handle := &ResumeHandle{
 		Results: make(chan ResumeResult, 1),
-		Cancel:  cancel,
 	}
 	go func() {
-		defer cancel()
 		defer close(handle.Results)
 
 		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
 			return process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
 		})
-		pluginCtx := context.WithValue(callCtx, syscallContextKey{}, dispatch)
+		pluginCtx := context.WithValue(ctx, syscallContextKey{}, dispatch)
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
-		// A cancelled or timed-out call is stopped, not failed: the wazero error
-		// it comes back with describes the module being closed, which says
-		// nothing about the guest's work. Cancel() and the quantum deadline both
-		// land here, since both are callCtx.
-		stopped := callCtx.Err() != nil
+		stopped := ctx.Err() != nil
 		process.state.finish(stopped)
 		if stopped {
-			handle.Results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: callCtx.Err()}
+			handle.Results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: ctx.Err()}
 			return
 		}
 		if err != nil {
