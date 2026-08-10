@@ -219,16 +219,19 @@ func TestGuestCanBeStopped(t *testing.T) {
 		}
 	})
 
-	handle, err := capcompute.Resume(ctx, process)
+	// The resume's context is the only way to stop it: ResumeHandle carries the
+	// outcome, not a canceller.
+	runCtx, stop := context.WithCancel(ctx)
+	handle, err := capcompute.Resume(runCtx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if _, err := capcompute.Resume(ctx, process); err != capcompute.ErrProcessActive {
+	if _, err := capcompute.Resume(runCtx, process); err != capcompute.ErrProcessActive {
 		t.Fatalf("concurrent resume error = %v, want ErrProcessActive", err)
 	}
 
-	handle.Cancel()
-	handle.Cancel()
+	stop()
+	stop()
 
 	results := handle.Results
 	select {

@@ -272,16 +272,26 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 	go func() {
 		defer close(handle.Results)
 
+		// The process's own wall-clock bound, on top of whatever the caller's
+		// context already carries: a guest that never yields is stopped either
+		// way, and the context is the only way to stop one.
+		callCtx := ctx
+		if process.timeout > 0 {
+			var cancel context.CancelFunc
+			callCtx, cancel = context.WithTimeout(ctx, process.timeout)
+			defer cancel()
+		}
+
 		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
 			return process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
 		})
-		pluginCtx := context.WithValue(ctx, syscallContextKey{}, dispatch)
+		pluginCtx := context.WithValue(callCtx, syscallContextKey{}, dispatch)
 		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
 
-		stopped := ctx.Err() != nil
+		stopped := callCtx.Err() != nil
 		process.state.finish(stopped)
 		if stopped {
-			handle.Results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: ctx.Err()}
+			handle.Results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: callCtx.Err()}
 			return
 		}
 		if err != nil {
