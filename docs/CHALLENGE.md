@@ -24,7 +24,7 @@ where the research exists only as papers. Each is labelled.
 | C | Reference monitor doesn't validate syscall args / authorization (confused deputy) | gap | **high** | ★★★ | **done** — the runtime's `monitor` package |
 | D | Determinism is a law but unused for testing (no DST) | gap | high | ★★ | **done** (`sim/`, in aurora-capcompute) |
 | E | JSON envelope ABI vs typed interfaces — **decided**: keep envelope; protobuf shipped as v3, **reverted to JSON in v4** | ADR (decided, amended) | — | ★ | **shipped** — ABI v4, JSON envelope in `sys` |
-| F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** — lives in the runtime (`internal/sched`) |
+| F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** — lives in the runtime (`internal/agent`, the scheduler around `direct`) |
 | G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ | built, then **removed** as premature; returns on the growth gauge |
 | H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ | built, then **removed** unconsumed; returns as dist ops |
 | I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ | built, then all **removed** unconsumed; `sys.spawn` reserved |
@@ -161,7 +161,7 @@ show a deterministic system should be tested by *simulating years of
 fault-injected operation in minutes and replaying any failure exactly*. Aurora
 is architecturally ready (deterministic guests, journaled I/O, pinned clock/RNG)
 and using none of it. This is also the natural test home for findings 8/9
-(intent records / compensation) whose whole difficulty is crash timing.
+(intent records, savepoint re-drive) whose whole difficulty is crash timing.
 
 **State of the art.** DST: control every nondeterminism source (already done),
 inject faults (crash-before-commit, crash-after-execute, resolver races,
