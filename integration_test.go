@@ -39,8 +39,6 @@ func (integrationDispatcher) Dispatch(_ context.Context, _ integrationPID, sysca
 	}
 }
 
-func (integrationDispatcher) Capabilities() []sys.Capability { return nil }
-
 func TestGuestResumeStates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping Wasm integration test in short mode")

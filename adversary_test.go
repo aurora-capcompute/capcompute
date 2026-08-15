@@ -97,8 +97,6 @@ func (bareEcho) Dispatch(_ context.Context, _ advPID, sc sys.Syscall, _ sys.Auth
 	return sys.Result(json.RawMessage(`{"ok":true}`)), nil
 }
 
-func (bareEcho) Capabilities() []sys.Capability { return nil }
-
 // --- run harness ---
 
 type advSetup struct {

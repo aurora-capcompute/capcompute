@@ -11,16 +11,6 @@ import (
 	"encoding/json"
 )
 
-type Capability struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
-	// Hidden keeps a capability dispatchable but excluded from the program's
-	// discoverable tool menu (e.g. the LLM cognition tool the program calls by a
-	// name it already knows).
-	Hidden bool `json:"hidden,omitempty"`
-}
-
 // Decision is the outcome of an external (human-in-the-loop) task approval.
 type Decision string
 
@@ -51,17 +41,4 @@ type Authorization struct {
 // policy decorators (validation, approval, quotas) consume it.
 type Dispatcher[K any] interface {
 	Dispatch(ctx context.Context, cred K, syscall Syscall, auth Authorization) (SyscallResult, error)
-	Capabilities() []Capability
-}
-
-// FindCapability resolves a capability by name in a grant set. Every monitor
-// layer (validation, flow policy, labeling, delegation) answers the same
-// question — "what does this name mean in this grant set?" — so it lives here.
-func FindCapability(grants []Capability, name string) (Capability, bool) {
-	for _, capability := range grants {
-		if capability.Name == name {
-			return capability, true
-		}
-	}
-	return Capability{}, false
 }

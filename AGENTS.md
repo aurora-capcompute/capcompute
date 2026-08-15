@@ -47,7 +47,7 @@ sys
   Dispatcher interface
   Syscall
   SyscallResult
-  Capability, Authorization
+  Authorization
 
 sys/replay
   replay Dispatcher decorator

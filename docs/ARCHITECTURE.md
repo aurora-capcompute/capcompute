@@ -45,10 +45,9 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `Resume` / `ProcessSpec` / `ResumeResult` / `ResumeHandle` | **Schedule a quantum** | give a process CPU until it yields/completes/stops/fails (cooperative) |
 | `sys.Syscall{Name,Args}` | **Syscall** (request) | the guest→host request crossing the trap boundary |
 | `sys.SyscallResult{result\|yield\|failed}` | **Syscall result** | the value/effect returned to the guest |
-| `sys.Capability` | **Capability** | the exact capability-security term |
 | `sys.Authorization` | **Grant / approval context** | forward-propagated authority for a replayed action |
 | `Process.Cred` / `Dispatch(ctx, cred, …)` | **Credential** | host-side identity + authority context for the process; never guest-visible or guest-supplied |
-| `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult`; lists `Capabilities()` |
+| `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult` — and nothing else; what a syscall *means* is the runtime's, not the kernel's |
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
 | `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |

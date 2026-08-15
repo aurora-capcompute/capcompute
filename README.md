@@ -189,8 +189,13 @@ func (myDispatcher) Dispatch(ctx context.Context, cred Run, call sys.Syscall, au
         return sys.Fail("unknown syscall"), nil
     }
 }
-func (myDispatcher) Capabilities() []sys.Capability { return nil }
 ```
+
+A dispatcher answers one question — what does this syscall do — and nothing
+else. What a syscall *means* (which cases it has, what its results are
+labelled, what may not flow into it, whether a human must approve it) is a
+policy question, and the kernel deliberately has no vocabulary for it: that
+belongs to whatever runtime is stacked on top.
 
 ## The syscall contract (guest ↔ host)
 
@@ -233,7 +238,7 @@ removed (design kept in docs) until a consumer forces it back.
 processor.go     Program, Process, NewProcess, Resume — the processor
 host.go          the single Extism host function + syscall dispatch
 ambient.go       deterministic clock + RNG (so replay above is exact)
-sys/             the syscall vocabulary: Syscall, Dispatcher, Capability, errno
+sys/             the syscall vocabulary: Syscall, SyscallResult, Dispatcher, errno
                  — and, via their JSON tags, the ABI-v4 wire envelope itself
 docs/            ARCHITECTURE.md (the OS model), PITCH.md, ROADMAP.md, …
 testdata/        the smallest Wasm guest fixtures used by integration tests
