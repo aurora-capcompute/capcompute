@@ -28,6 +28,62 @@ type Capability struct {
 	// guest is opaque, flow is judged conservatively: once a process has observed
 	// a label, everything it emits may derive from it.
 	Forbid []string `json:"forbid,omitempty"`
+
+	// Discriminator names the argument property that selects which Operation a
+	// call is (e.g. "operation", "method"). Empty means the capability is one
+	// operation and Operations is empty. It is read, never canonicalized: the
+	// value the guest sent is matched exactly, so a reference monitor above the
+	// journal and a dispatcher below it always resolve the same case.
+	Discriminator string `json:"discriminator,omitempty"`
+	// Operations are the cases of this capability's ADT, each with its own
+	// argument shape and its own flow policy. A capability that declares them
+	// carries the policy here rather than at the capability level, so a monitor
+	// can enforce per-case instead of per-family.
+	Operations []Operation `json:"operations,omitempty"`
+}
+
+// Operation is one case of a capability's ADT: what it is, the shape of its
+// arguments, and the flow and approval policy that applies to it alone.
+type Operation struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	// Labels are the source classes this operation's results carry; Forbid are
+	// the labels that may not flow into its arguments. Both mean exactly what
+	// their capability-level counterparts mean, scoped to one case.
+	Labels []string `json:"labels,omitempty"`
+	Forbid []string `json:"forbid,omitempty"`
+	// RequireApproval parks the call as a durable task until a human resolves
+	// it, rather than serving it.
+	RequireApproval bool `json:"require_approval,omitempty"`
+}
+
+// FindOperation resolves the case a call belongs to. It returns false when the
+// capability has no ADT, when the discriminator is absent or not a string, or
+// when the value names no declared operation — every one of which must be
+// treated as "no policy resolved", never as "no policy applies".
+func (c Capability) FindOperation(args json.RawMessage) (Operation, bool) {
+	if c.Discriminator == "" || len(c.Operations) == 0 {
+		return Operation{}, false
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(args, &envelope); err != nil {
+		return Operation{}, false
+	}
+	raw, ok := envelope[c.Discriminator]
+	if !ok {
+		return Operation{}, false
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return Operation{}, false
+	}
+	for _, operation := range c.Operations {
+		if operation.Name == value {
+			return operation, true
+		}
+	}
+	return Operation{}, false
 }
 
 // Decision is the outcome of an external (human-in-the-loop) task approval.
