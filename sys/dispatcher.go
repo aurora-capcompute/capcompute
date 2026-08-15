@@ -9,7 +9,6 @@ package sys
 import (
 	"context"
 	"encoding/json"
-	"strings"
 )
 
 type Capability struct {
@@ -30,17 +29,14 @@ type Capability struct {
 	// a label, everything it emits may derive from it.
 	Forbid []string `json:"forbid,omitempty"`
 
-	// Discriminator names the argument properties that together select which
-	// Operation a call is — usually one ("operation", "method"), but as many as
-	// the family needs: core.memory's case is (operation, scope, space), because
-	// one operation on two mounts is two cases with two policies. Empty means the
-	// capability is one operation and Operations is empty.
+	// Discriminator names the argument property that selects which Operation a
+	// call is (e.g. "operation", "method"). Empty means the capability is one
+	// operation and Operations is empty.
 	//
-	// The properties are read, never canonicalized, and a missing one reads as
-	// empty: the values the guest sent are joined and matched exactly, so a
-	// reference monitor above the journal and a dispatcher below it always
-	// resolve the same case.
-	Discriminator []string `json:"discriminator,omitempty"`
+	// It is read, never canonicalized: the value the guest sent is matched
+	// exactly, so a reference monitor above the journal and a dispatcher below
+	// it always resolve the same case.
+	Discriminator string `json:"discriminator,omitempty"`
 	// Operations are the cases of this capability's ADT, each with its own
 	// argument shape and its own flow policy. A capability that declares them
 	// carries the policy here rather than at the capability level, so a monitor
@@ -51,9 +47,7 @@ type Capability struct {
 // Operation is one case of a capability's ADT: what it is, the shape of its
 // arguments, and the flow and approval policy that applies to it alone.
 type Operation struct {
-	// Name is the case's identity: the discriminator values in order, joined.
-	// For a single-property discriminator that is just the value ("get"); for
-	// several it is the tuple ("get\x00shared\x00notes").
+	// Name is the case's identity: the discriminator's value ("get").
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
@@ -72,7 +66,7 @@ type Operation struct {
 // when the value names no declared operation — every one of which must be
 // treated as "no policy resolved", never as "no policy applies".
 func (c Capability) FindOperation(args json.RawMessage) (Operation, bool) {
-	if len(c.Discriminator) == 0 || len(c.Operations) == 0 {
+	if c.Discriminator == "" || len(c.Operations) == 0 {
 		return Operation{}, false
 	}
 	name, ok := OperationName(c.Discriminator, args)
@@ -87,35 +81,24 @@ func (c Capability) FindOperation(args json.RawMessage) (Operation, bool) {
 	return Operation{}, false
 }
 
-// OperationSeparator joins the discriminator's values into a case name. It
-// cannot occur in a JSON string that survives validation, so the join is
-// unambiguous: two different tuples can never produce one name.
-const OperationSeparator = "\x00"
-
-// OperationName reads the discriminator properties out of a call's arguments
-// and joins them. A property that is absent reads as empty — that is a case in
-// its own right (core.memory's bare selector on a single-mount grant), not a
-// failure. It fails only when the arguments are not an object, or a named
-// property is present but not a string.
-func OperationName(discriminator []string, args json.RawMessage) (string, bool) {
+// OperationName reads the discriminator property out of a call's arguments. An
+// absent property reads as empty — that is a case in its own right, not a
+// failure. It fails only when the arguments are not an object, or the property
+// is present but not a string.
+func OperationName(discriminator string, args json.RawMessage) (string, bool) {
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(args, &envelope); err != nil {
 		return "", false
 	}
-	values := make([]string, 0, len(discriminator))
-	for _, property := range discriminator {
-		raw, present := envelope[property]
-		if !present {
-			values = append(values, "")
-			continue
-		}
-		var value string
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return "", false
-		}
-		values = append(values, value)
+	raw, present := envelope[discriminator]
+	if !present {
+		return "", true
 	}
-	return strings.Join(values, OperationSeparator), true
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false
+	}
+	return value, true
 }
 
 // Decision is the outcome of an external (human-in-the-loop) task approval.
