@@ -73,8 +73,33 @@ func dispatchSyscall(
 	return returnToGuest(plugin, result)
 }
 
+// guestResult is the kernel's guest-facing rendering of a syscall outcome, and
+// it is a distinct type from the durable one on purpose.
+//
+// A SyscallResult also carries provenance labels: the runtime's flow monitor
+// stamps them and the journal records them, so a crash-restarted host can
+// rebuild a run's taint. A guest must never see them. It is opaque and possibly
+// adversarial, and the labels are exactly the map it would need to route around
+// the flow policy — which of its calls taint the run, and therefore which path
+// out is still clean.
+//
+// Expressing that as its own struct rather than as a field the marshaller skips
+// means the guest ABI structurally cannot carry a label: there is no field to
+// forget to strip.
+type guestResult struct {
+	Status  sys.SyscallStatus `json:"status"`
+	Code    sys.Errno         `json:"code,omitempty"`
+	Result  json.RawMessage   `json:"result,omitempty"`
+	Message string            `json:"message,omitempty"`
+}
+
 func returnToGuest(plugin *extism.CurrentPlugin, result sys.SyscallResult) uint64 {
-	encoded, err := json.Marshal(result)
+	encoded, err := json.Marshal(guestResult{
+		Status:  result.Status(),
+		Code:    result.Errno(),
+		Result:  result.Result(),
+		Message: result.Message(),
+	})
 	if err != nil {
 		panic(fmt.Errorf("encode host response: %w", err))
 	}
