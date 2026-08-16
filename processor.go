@@ -227,9 +227,7 @@ type ResumeHandle struct {
 
 // NewProcess instantiates a fresh process from the program image —
 // posix_spawn semantics: a named program, explicit input, explicitly handed
-// authority (the dispatcher), nothing inherited. The guest-side counterpart
-// is the reserved sys.spawn syscall, served above the processor by whatever
-// spawner the runtime composes.
+// authority (the dispatcher), nothing inherited.
 func NewProcess[K any](ctx context.Context, program *Program, spec ProcessSpec[K]) (*Process[K], error) {
 	moduleConfig, ambient := guestModuleConfig()
 	plugin, err := program.compiled.Instance(ctx, extism.PluginInstanceConfig{

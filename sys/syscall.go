@@ -27,7 +27,6 @@ const (
 	SyscallOutput     = "sys.output"
 	SyscallLog        = "sys.log"
 	SyscallAbort      = "sys.abort"
-	SyscallSpawn      = "sys.spawn"
 	SyscallTimer      = "sys.timer"
 	SyscallDeclassify = "sys.declassify"
 	SyscallNow        = "sys.now"
