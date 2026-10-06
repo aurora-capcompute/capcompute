@@ -63,7 +63,7 @@ AI agents safely:
   deterministic execution, resource caps.
 - **[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)** —
   the orchestration runtime built on top: the reference monitor (grants, flow
-  policy), replay, the journal, sessions, retries, approvals, sub‑agents.
+  policy), replay, the journal, sessions, retries, approvals.
 - **[aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers)** —
   the concrete drivers that actually make HTTP calls, read files, call an LLM.
 - **[aurora-brains](https://github.com/aurora-capcompute/aurora-brains)** — the
@@ -83,7 +83,7 @@ You rarely use `capcompute` on its own. It's the engine the rest is built from.
 | **Yield / resume** — a process can pause on outside work (an approval, a timer) and be resumed later | Human‑in‑the‑loop and long waits without holding a thread |
 
 The governed‑execution features built *on* this gate — the recorded
-hash‑chained journal, exactly‑once replay, savepoints,
+journal, exactly‑once replay, savepoints,
 capability grants and information‑flow control — live in
 [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
 (its `monitor`, `replay`, and `journaled` packages).
@@ -113,7 +113,7 @@ Run only the fast unit tests, or a single package:
 
 ```sh
 go test -short ./...                      # skip the slow Wasm guest tests
-go test ./sys/replay/tape/journaled/      # one package
+go test ./sys/                            # one package
 ```
 
 The integration test builds a real Wasm guest and drives it through completed /
@@ -218,8 +218,9 @@ one of three statuses:
 
 The guest decides what to do with the response and returns from its exported
 function with `{"status":"completed"}` or `{"status":"yielded"}`. Some syscall
-names are reserved by the processor: `sys.begin`, `sys.commit`, `sys.abort`,
-`sys.spawn`, `sys.timer`, `sys.declassify`, `sys.now`, `sys.random`.
+names are reserved by the processor: `sys.begin`, `sys.commit`, `sys.input`,
+`sys.output`, `sys.log`, `sys.abort`, `sys.timer`, `sys.declassify`, `sys.now`,
+`sys.random`.
 
 ## What this library deliberately does **not** own
 

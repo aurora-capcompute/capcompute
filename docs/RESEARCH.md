@@ -293,7 +293,9 @@ a runtime). This layer is genuinely near the frontier.
 4. ~~**Intent/completion records (finding 8)**~~ — done (ROADMAP #9: the
    two-record tape, idempotency keys; attempt-scoped across rollbacks per
    ROADMAP #25).
-5. ~~**Compensation + saga unwinding (finding 9)**~~ — done, with the verdict
+5. ~~**Compensation + saga unwinding (finding 9)**~~ — built, then **removed**
+   (2026-08-16: no host served `sys.compensate`; `sys.abort` now only re-runs
+   the open section). It was built with the verdict
    overturned in one respect: compensation shipped **guest-registered in the
    log** (`sys.compensate`/`sys.abort`), not as `sys.Capability` metadata —
    the declared-metadata design was built, then replaced; capabilities stay

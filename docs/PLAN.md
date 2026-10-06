@@ -10,7 +10,15 @@ Read the other docs for *why*; this doc is *what, in what order, and done-when*.
 > File references in the milestones below predate the 2026-07-19 charter
 > passes: the monitor (validate/provenance/stack), replay, journal, scheduler,
 > and DST harness now live in aurora-capcompute (`monitor/`, `replay/`,
-> `journaled/`, `internal/sched/`, `sim/`).
+> `journaled/`, `internal/agent/`, `sim/`).
+
+> **Later removals (2026-08).** This is a work log: a `DONE` below records what
+> was built, not what ships. Since then these were removed: compensation
+> (`sys.compensate`, M3.2), child processes and `sys.spawn` (M5.2), the
+> tenant-memory driver `core.memory` (M6.1–M6.2), the journal hash chain
+> (`prev_hash`), the fair-share scheduler, `monitor.Attenuate`, and the k8s and
+> MCP drivers. Two monitor layers were renamed: `Labeler` is now `Flow.Stamp`,
+> and `FlowMonitor` is now `Flow.Guard`.
 
 ## Status legend
 `DONE` shipped · `NEXT` cleared to start · `BLOCKED(x)` waits on x ·
@@ -121,7 +129,7 @@ unwound. This is the durability heart and the biggest audit-story win. DST
   new record types appear; "log within session" and "log within run" are index
   scans. Downstream SQLite/`task.Record` adopt the same contract on the runtime
   migration (blocked).
-- **M3.2 Compensation metadata + saga unwinding** — `DONE` (`Capability.Compensation`, `saga.go`) (ROADMAP #10)
+- **M3.2 Compensation metadata + saga unwinding** — `DONE`, then **removed** (`Capability.Compensation`, `saga.go`) (ROADMAP #10)
   Add declared `Compensation` to `sys.Capability` (inverse syscall name, or
   explicit cannot-compensate). Kernel-level unwind: on scope abort, walk the
   journal's completed effects in reverse and dispatch compensations — each
@@ -243,7 +251,7 @@ Sessions are execution scope, not data scope; cross-session memory belongs to th
 **tenant** level, reached as a capability, never by widening session scope. This
 is a **driver-layer** feature, independent of the M1–M5 queue.
 
-- **M6.1 Tenant-scoped store capability** — `DONE` (`aurora-dispatchers/memory`, `core.memory` registration: tenant scoping, subtree chroot, approval-gated writes, replay re-read test)
+- **M6.1 Tenant-scoped store capability** — `DONE`, then **removed** (`aurora-dispatchers/memory`, `core.memory` registration: tenant scoping, subtree chroot, approval-gated writes, replay re-read test)
   A `memory.get` / `memory.put` capability (file-flavoured `fs.*` also fine),
   implemented as a dispatcher/driver in `aurora-dispatchers` over a
   tenant-scoped KV store. The two laws fix its form:
@@ -258,7 +266,7 @@ is a **driver-layer** feature, independent of the M1–M5 queue.
   DoD: two sessions of one tenant share state via get/put; a replay re-reads the
   journaled value; an agent attenuated to a subtree cannot read outside it;
   cross-tenant access denied.
-- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `DONE` (`memory.put` stores the writer's taint via `sys.Taint`, `memory.get` restamps it; cross-session poison test drives the full stack)
+- **M6.2 Provenance-labelled memory (memory-poisoning defense)** — `DONE`, then **removed** with M6.1 (`memory.put` stores the writer's taint via `sys.Taint`, `memory.get` restamps it; cross-session poison test drives the full stack)
   `memory.put` stores the value's labels (M4 provenance); `memory.get` surfaces
   them, so a value written from an `untrusted_web`-tainted run resurfaces in a
   later session *as untrusted*, not as laundered truth. This is the differentiator
@@ -307,8 +315,8 @@ record shape settles.
 - **Journal lifecycle** — unblocked (M3.1 landed), `DEFER` until journals carry real volume (CHALLENGE G, supersedes ROADMAP #7):
   snapshot + compaction + retention once journals carry real intent/completion
   volume; verifiable archived segments via the hash-chain.
-- **Hash-chained journal** — `DONE` with M3.1 (ROADMAP #3): `prev_hash` per record,
-  `journaled.Verify` walks structure + chain.
+- **Hash-chained journal** — `DONE` with M3.1 (ROADMAP #3), then **removed**
+  (2026-08-15): `journaled.Verify` now walks structure only.
 - **Journal → OpenTelemetry** — built (`otelexport/`), then **removed
   unconsumed** (CHALLENGE H, ROADMAP #17); the mapping (run=trace root,
   intent=span, completion folds in, open intent=error span) returns as
@@ -496,5 +504,4 @@ behind their return triggers. Standing
 deferrals, unchanged: **M2.3** CPU fuel waits on a wazero fuel mechanism;
 **M5.4** unforgeable capability references wait on evidence that
 authorized-by-cred is insufficient; **journal lifecycle** waits on real
-volume; the processor-side `Spawner` returns by revert only if processor-composed
-children are ever needed (`sys.spawn` itself is live in the runtime's router).
+volume. The August 2026 removals are listed at the top of this document.

@@ -51,11 +51,10 @@ no preemption; no `Interrupt`: yields are cooperative).
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
 | `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
-| `Validator` / `FlowMonitor`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
+| `Validator` / `Flow`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
 | `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
-| `sched.Scheduler` (aurora-capcompute) | **Scheduler** | fair share across owners, priority bands, quota backpressure; virtual-actor residency — scheduling is runtime policy, so it lives above the processor |
-| `core.memory` (aurora-dispatchers) | **Filesystem / `$HOME`** | tenant-scoped, mount-scoped (`process` / `session` / `shared` spaces named by a separate `space` field — no tenant-wide scope, cross-tenant impossible), provenance-labelled, versioned (CAS) shared state |
-| `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | same operations as core.memory but a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
+| `Scheduler` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
+| `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | get/put/list/search on a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
 > (which would shadow Go's stdlib).
@@ -99,15 +98,11 @@ markers with stack semantics; failed-process resume forks the journal past the
 outermost unclosed bracket. Call them what they are: a redo scope can only
 *re-execute* its contents, never undo them — bracketing non-idempotent,
 un-keyed effects amplifies at-least-once execution (RESEARCH.md finding 9).
-The undo layer is separate and guest-authored: right after an effect the guest
-registers its inverse with `sys.compensate` (a deferred syscall — journaled
-with concrete args, not executed), and `sys.abort` rolls the open scope back —
-the runtime executes the registered compensations newest-first, each journaled
-(intent/completion, idempotency-keyed, crash-resumable), then retries the scope
-after the abort's declared delay or stops. Capabilities carry no compensation
-metadata: they are access control, and the undo story lives in the log, in
-guest-supplied terms. Replay refuses to run past a compensation record
-(`ProcessUnwoundError`) — a rolled-back tail never replays as if live.
+There is no undo layer. `sys.abort` abandons the open scope: the runtime forks
+the journal at its `sys.begin` and re-runs the scope live, bounded by an
+abort-retry budget; with no scope open the process fails. A scope that must be
+re-runnable is the program's own contract. (A guest-authored undo layer,
+`sys.compensate`, was built and then removed — no host served it.)
 
 Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` from
 their entrypoint. **This ABI is your POSIX: version it, keep it small, and treat
@@ -152,8 +147,8 @@ governance and durability claims *provable* rather than aspirational.
    *Enforced in code:* the intent/completion tape
    (the runtime's `journaled` package); an open intent met on replay is retried
    under its original idempotency key or surfaced as `IndeterminateError`,
-   per `OpenIntentPolicy`; records are hash-chained (`prev_hash`,
-   `journaled.Verify`) so the journal is tamper-evident.
+   per `OpenIntentPolicy`; `journaled.Verify` checks the record structure.
+   The journal is not tamper-evident: the hash chain was removed.
 4. **Un-bypassable reference monitor.** An approval-required capability cannot
    execute without a resolved `Authorization`, and the monitor validates
    *every* access — **complete mediation**: a syscall is checked against the
@@ -163,8 +158,8 @@ governance and durability claims *provable* rather than aspirational.
    The monitor also tracks **information flow** (the CaMeL architecture as
    a processor primitive): each granted operation declares the source classes its
    results carry (`labels`, e.g. `untrusted_web`) and the classes that may not
-   flow into it (`taints`) — inline per-operation policy the driver enforces on
-   each call, since it alone decodes which operation the call args select;
+   flow into it (`taints`) — per-operation policy declared on the operation's
+   entry in the grant table, which resolves the operation from the call args;
    because the guest is opaque, flow is judged
    conservatively — every label a process observes taints everything it later
    emits. Declassification is the reserved `sys.declassify` syscall: every
@@ -174,13 +169,13 @@ governance and durability claims *provable* rather than aspirational.
    asking again.
    *Enforced in code:* the runtime's `monitor` package — the `Validator`
    decorator at the front of the dispatcher chain, plus the provenance set —
-   `Labeler` and `Declassifier` below the replay layer (so labels and
-   approved crossings are journaled) and `FlowMonitor` above it (so a
+   `Flow.Stamp` and `Declassifier` below the replay layer (so labels and
+   approved crossings are journaled) and `Flow.Guard` above it (so a
    crash-restarted host rebuilds taint exactly from replayed results, and
    replayed declassifications lift labels in order). The monitor also hands
-   the process's taint downstream (`sys.Taint`) so drivers that store
-   guest-derived data persist its provenance. Chain order: `Validator` →
-   `FlowMonitor` → replay → `Labeler` → `Declassifier` →
+   the process's taint downstream (`capability.WithTaint`) so drivers that
+   store guest-derived data persist its provenance. Chain order: `Validator` →
+   `Flow.Guard` → replay → `Flow.Stamp` → `Declassifier` →
    drivers — encoded in `monitor.Stack.ForProcess`, so assembling a chain with a layer on the wrong side of the
    replay boundary is a construction you cannot express, not a rule you must
    remember. Reserved
@@ -197,7 +192,7 @@ They come in two directions, and recognizing them as *the same category pointed
 opposite ways* keeps the architecture coherent:
 
 - **Outbound drivers = dispatchers.** Called *by* a process as an outbound syscall
-  (`process → device`): internet reads, k8s/Helm, `sys.timer`. The
+  (`process → device`): internet reads, file reads, host commands, `sys.timer`. The
   process initiates; the driver mediates access to a machine device.
 - **Inbound drivers = sources.** Drive processes *from outside* (`human → processor →
   process`): Telegram, Slack. The device on the other end is a **human**. A source
@@ -221,9 +216,12 @@ Consequences of the symmetry, used as design rules:
   crashes), sessions survive restart. Model it as a persistent terminal server
   (getty + tmux that survives reboot), consistent with orthogonal persistence.
 
-## Processes and `spawn` (reserved syscall)
+## Processes and `spawn` (not served)
 
-Agents creating agents is the **`spawn` syscall**. Design decisions, with prior art:
+Agents creating agents is not supported today. A `sys.spawn` syscall was built
+to the design below, served by the runtime, and then removed with child
+processes; the name is no longer reserved. The design stays here for the day a
+consumer needs it. Design decisions, with prior art:
 
 - **`spawn`, not `fork`.** Use `posix_spawn`/`CreateProcess` semantics:
   `spawn(program, input, capabilities) → child_pid`. A *fresh* process running a
@@ -247,26 +245,15 @@ Agents creating agents is the **`spawn` syscall**. Design decisions, with prior 
   cascade-kill vs orphan-adopt on parent `Stop`. Study Erlang/OTP supervision trees
   before this grows.
 
-**Status:** `sys.spawn` is live, served **above the processor** by the runtime's
-spawn router (its grant carries the manifests of the only programs the
-process may spawn — richer than name-list attenuation). A processor-side
-`Spawner` decorator implementing the design here was built in parallel
-(attenuation via `monitor.Attenuate`, child cred derived from the spawn's
-idempotency key — strictly stronger than the sketched `spawn_seq`; transitive
-yield; a stopped child keeps the intent open), and **removed unconsumed** —
-the runtime's router is the spawner, so the processor one had no caller. The
-name stays reserved; the decorator returns by revert only if processor-composed
-children are ever needed.
-
 ## Scheduling: above the processor
 
 Scheduling is runtime policy, not a processor primitive: the processor's whole
-contribution is `Resume` (one cooperative quantum). The fair-share scheduler —
-priority bands, per-owner quota backpressure, virtual-actor residency (the
-journal is the durable process, the instance is cache) — lives in
-aurora-capcompute (`internal/sched`), where its only consumer is. An
-OTP-style supervisor and a delay-only `Throttle` rate limiter were built here
-and removed unconsumed; their designs live in git and `ROADMAP.md`.
+contribution is `Resume` (one cooperative quantum). The scheduler lives in
+aurora-capcompute (`internal/agent/sched.go`), where its only consumer is: a
+fixed pool of workers, first-come-first-served, with a wall-clock deadline per
+quantum and no residency — every quantum starts a fresh instance. A fair-share
+scheduler, an OTP-style supervisor, and a delay-only `Throttle` rate limiter
+were built and removed unconsumed; their designs live in git and `ROADMAP.md`.
 
 ## Persistence and replay
 
@@ -297,12 +284,16 @@ lives by *level*:
   facts, standing context). **This is the shared-data home**; without it,
   "data shared between sessions" has no principled place.
 
-Two laws dictate the *form* the tenant store must take — it is not a
+**Status:** no tenant store ships today. `core.memory` was built to the design
+below and then removed; `core.scratch` is the only store, and it is
+per-process.
+
+Two laws dictate the *form* a tenant store must take — it is not a
 special case, it is a driver:
 
 1. **Determinism (law #2)** forbids ambient reads of shared mutable state (a
    concurrent mutation from another session would diverge replay). So the store
-   sits **behind a journaled syscall** (`core.memory`'s `get`/`put` operations, or
+   sits **behind a journaled syscall** (a `get`/`put` capability, or
    file-flavoured `fs.*`): the *read result* is committed to the journal, and
    replay re-reads the recorded value regardless of the store's current
    contents. This is identical to how the ultimate shared mutable store — the
@@ -321,12 +312,11 @@ Security payoff: **memory poisoning** (planting an instruction that the agent
 write from a process whose inputs were `untrusted_web`-tainted stores that label
 with the value (M4 provenance), so a later read surfaces it as untrusted content
 rather than laundered truth. Most agent stacks bolt memory on as an ambient RAG
-lookup outside all governance; here it is a journaled, labelled, attenuated
-syscall.
+lookup outside all governance; here it would be a journaled, labelled,
+attenuated syscall.
 
 Concurrency: like a filesystem shared across sessions, concurrent writers need
-coordination. v1 may be last-writer-wins on the `put` operation; compare-and-set is the
-upgrade. (See PLAN.md "Tenant memory".)
+coordination; compare-and-set on the `put` operation is the design.
 
 ## Coherence under growth: versioned replay
 

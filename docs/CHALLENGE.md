@@ -27,7 +27,7 @@ where the research exists only as papers. Each is labelled.
 | F | Scheduling: no fairness, admission control, priority, or activation | gap | medium | ★ | **done** — lives in the runtime (`internal/agent`, the scheduler around `direct`) |
 | G | No journal lifecycle: compaction, GC, retention | gap | medium | ★★ | built, then **removed** as premature; returns on the growth gauge |
 | H | No observability / trace export (the journal is an unused trace) | gap | medium | ★ | built, then **removed** unconsumed; returns as dist ops |
-| I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ | built, then all **removed** unconsumed; `sys.spawn` reserved |
+| I | IPC + supervision unspecced for the multiprocess future | spec debt | medium | ★ | built, then all **removed**; `sys.spawn` is no longer reserved |
 | J | Capabilities are authorized-by-name, not unforgeable references | classification | low | ★ | documented; **deferred** |
 | K | Journal record is an unprincipled column/payload hybrid (schema drift) | gap | medium | ★★ | **done** (M3.1 envelope+payload) |
 
@@ -337,11 +337,12 @@ spawn forces it.
 **Outcome — the whole cluster met the razor.** IPC (`sys.send`/`sys.recv`)
 was prototyped and removed first — never wired, dead weight. Spawn and
 supervision shipped (`spawn.go`, `sched/supervisor.go`), then followed in the
-2026-07-19 charter pass: the runtime serves `sys.spawn` with its own router,
+2026-07-19 charter pass: the runtime served `sys.spawn` with its own router,
 so the processor's parallel decorator (and the supervisor beside it) had no
-caller and were removed unconsumed — the name stays reserved and the design
-stands in `ARCHITECTURE.md`. Cross-process data sharing is an explicit granted channel
-(`core.memory`), not ambient message passing; finding J's revisit trigger
+caller and were removed unconsumed. In 2026-08 the runtime's child processes
+and `sys.spawn` were removed too; the design stands in `ARCHITECTURE.md`.
+Cross-process data sharing, if it returns, is an explicit granted channel (as
+`core.memory` was), not ambient message passing; finding J's revisit trigger
 (capability delegation over IPC) recedes with it.
 
 ## J. Capabilities are authorized-by-name, not unforgeable references — classification, not bug

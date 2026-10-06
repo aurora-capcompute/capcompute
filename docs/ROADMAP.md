@@ -60,13 +60,11 @@ deployment config; small verification bits in aurora-dist's store.
 Nothing is exported today (the journal→OTel exporter was removed unconsumed);
 nobody gets paged. Build the operational surface in aurora-dist — journal
 traces if wanted, and the metrics that page: terminal process counts by
-status *and cause*, executed and
-failed compensations (a failed rollback is undefined external state — page),
-re-drive wall hits, pending-task age, timer reconcile lag, DB size, LLM call
-latency/errors. Alert set on: failed compensation, task nearing expiry
-unresolved, DB size threshold. The runbook explains what a rollback report is
-(the remediation map), how to resolve/deny tasks, retry/stop semantics, and
-the program drain-and-deprecate procedure the digest law implies. Lands across
+status *and cause*, abort-retry budget exhaustion, re-drive wall hits,
+pending-task age, timer reconcile lag, DB size, LLM call latency/errors. Alert
+set on: task nearing expiry unresolved, DB size threshold. The runbook explains
+how to resolve/deny tasks, retry/stop semantics, and the program
+drain-and-deprecate procedure the digest law implies. Lands across
 aurora-capcompute (counters at the seams) and aurora-dist (exposition).
 
 ### 30. LLM spend budget per process
@@ -94,8 +92,8 @@ manifest files in aurora-dist.
 - **Multi-tenancy** — per-principal grants via attenuation tokens (macaroons,
   Birgisson et al., NDSS '14; the D3 policy layer), per-tenant ceilings and
   quotas, a silo-per-tenant control plane, metering folded from the journal.
-  The design intent stays: `TenantID` already threads scopes, leases, memory,
-  and task tokens, and the ceiling already speaks `monitor.Attenuate`. Returns
+  The design intent stays: `TenantID` already threads scopes, leases, and task
+  tokens, and the dist already refuses manifests past a capability ceiling. Returns
   when a second tenant is real, as identity → policy → silo control plane, in
   that order.
 - **MCP driver** — bridging stdio MCP servers as granted syscalls
@@ -119,31 +117,31 @@ manifest files in aurora-dist.
 
 > File references below predate the 2026-07-19 charter passes: the monitor,
 > replay, journal, scheduler, and DST harness now live in aurora-capcompute
-> (`monitor/`, `replay/`, `journaled/`, `internal/sched/`, `sim/`). The processor
+> (`monitor/`, `replay/`, `journaled/`, `internal/agent/`, `sim/`). The processor
 > library keeps the process core and `sys`.
 
 | # | Item | Status |
 |---|------|--------|
 | 0 | Ambient-surface lockdown (the processor owns guest WASI sources) | **done** (`ambient.go`, `ErrAmbientAuthority`) |
 | 1 | Journal program-versioning + replay compatibility check | **done** (`journaled.Header`, `ReplayIncompatibleError`) |
-| 2 | Law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the rollback matrices and runtime tests cover the rest in practice |
-| 3 | Hash-chained journal (tamper-evident audit) | **done** (`prev_hash`, `journaled.Verify`) |
-| 4 | Capability attenuation helper | **done** (now `monitor.Attenuate` — moved with the reference monitor) |
-| 5 | `process.spawn` syscall (sync-first child processes) | **done** — served by the runtime's spawn router; the processor's parallel `Spawner` decorator was removed unconsumed |
+| 2 | Law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the abort/savepoint and runtime tests cover the rest in practice |
+| 3 | Hash-chained journal (tamper-evident audit) | built, then **removed** (2026-08-15); `journaled.Verify` checks structure only |
+| 4 | Capability attenuation helper | built, then **removed**; the dist's capability ceiling is a plain allowlist |
+| 5 | `process.spawn` syscall (sync-first child processes) | built, then **removed** with child processes; the name is no longer reserved |
 | 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape, idempotency keys) |
-| 10 | Guest-registered compensation + abort-retry | **done** (see §10 below — the full rollback semantics) |
+| 10 | Guest-registered compensation + abort-retry | abort-retry **done** (section re-run); compensation built, then **removed** — no host served it (see §10) |
 | 11 | Information-flow labels + provenance (CaMeL-style) | **done** (labels, flow policy, `sys.declassify`) |
-| 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`); quotas live in the runtime's scheduler; the `Throttle` limiter was removed unconsumed |
+| 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`); quotas were removed with the fair-share scheduler; the `Throttle` limiter was removed unconsumed |
 | 13 | Reference-monitor validation (grant-set + InputSchema) | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | **done** (`sim/`, crash matrices — all `_test.go`) |
-| 15 | Scheduler: priority, admission, virtual-actor activation | **done** — moved to the runtime (`internal/sched`); the supervisor was removed unconsumed |
+| 15 | Scheduler: priority, admission, virtual-actor activation | built, then **removed**; the runtime's scheduler is a first-come-first-served worker pool (`internal/agent/sched.go`); the supervisor was removed unconsumed |
 | 16 | Journal lifecycle: snapshot + compaction + retention | removed — built, then taken out as premature; see *Out of scope* |
 | 17 | Journal→OpenTelemetry exporter | built, then **removed** unconsumed; returns as dist ops (#29) |
-| 18 | Exactly-once effects: drivers honor idempotency keys | **done** (memory driver activity memory) |
-| 19 | Reservation / TCC as a pattern | **done** — a pattern over dispatch + compensate, not a driver (see §19) |
-| 20 | Approval-composable compensation (yielding inverse) | **done** (rollback parks on the inverse's task and resumes) |
-| 21 | Deterministic rollback matrix | **done** (abort + guest-failure stories at every append position) |
+| 18 | Exactly-once effects: drivers honor idempotency keys | **done** (the `memory` store's activity memory, under `core.scratch`) |
+| 19 | Reservation / TCC as a pattern | **removed** with compensation — the pattern needs `sys.compensate` (see §19) |
+| 20 | Approval-composable compensation (yielding inverse) | built, then **removed** with compensation |
+| 21 | Deterministic rollback matrix | built, then **removed** with compensation; abort and guest-failure re-run tests remain |
 | 22 | Journaled time & randomness (`sys.now`, `sys.random`) | **done** (worldDispatcher below replay) |
 | 24 | Plan/execute program (CaMeL) | **done** (camel: quarantined planner, `$N` routing) |
 | 25 | Attempt-scoped idempotency keys across rollbacks | **done** (records carry their writing revision; keys derive from the record) |
@@ -152,6 +150,11 @@ Items 7 (snapshot/checkpoint), 8 (chat sources as drivers), and 23
 (macaroons) moved to *Out of scope* with their return triggers.
 
 ### 10. Guest-registered compensation + abort-retry
+
+> **Status:** compensation was removed (2026-08-16) — no host served
+> `sys.compensate`. What remains is the re-run: `sys.abort`, or a failure
+> inside an open section, forks the journal at the section's `sys.begin` and
+> re-runs it live; nothing is undone. The text below is the design record.
 
 `sys.begin`/`sys.commit` are **redo scopes**, not savepoints — they can only
 re-execute, never undo, and re-execution amplifies at-least-once (RESEARCH.md
@@ -196,6 +199,9 @@ conclusion is what licenses the retry of a zero-registration scope to fork:
 that rollback leaves no journal trace at all.
 
 ### 19. Reservation / TCC as a pattern
+
+> **Status:** not available — the pattern below needs `sys.compensate`, which
+> was removed. The text below is the design record.
 
 Sagas have no isolation (García-Molina & Salem '87; Richardson's
 countermeasures: semantic lock, pending state). The resolution: Try-Confirm/

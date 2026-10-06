@@ -18,15 +18,11 @@ The root package is the library entrypoint.
 
 Root `capcompute` owns:
 
-- `Kernel`
-- `Config`
-- `Process`
-- `PID`
-- `ProcessTable`
-- `ProcessSpec`
-- `ResumeResult`
-- process lifecycle
-- Extism plugin creation and syscall host-function wiring
+- `Config`, `Program`, `NewProgram` — compiling a program image
+- `Process`, `ProcessSpec`, `NewProcess` — instantiating a process
+- `Resume`, `ResumeHandle`, `ResumeResult` — one cooperative quantum
+- `PID` — the identity contract layers above key on
+- the ambient lockdown (`ambient.go`) and the syscall host function (`host.go`)
 
 Do not add root packages, public packages, examples, or old engine concepts unless
 explicitly asked.
@@ -41,25 +37,18 @@ Current boundaries:
 
 ```text
 capcompute
-  Kernel (compiled program image), processes, ProcessTable, Resume/Replay lifecycle
+  program images, processes, the Resume quantum, the host function
 
 sys
   Dispatcher interface
-  Syscall
-  SyscallResult
+  Syscall, SyscallResult, Errno
   Authorization
-
-sys/replay
-  replay Dispatcher decorator
-  Tape interface
-
-sys/replay/tape/journaled
-  journal-backed Tape implementation
-  Journal interface
-
-memory
-  in-memory ProcessTable implementation
+  the reserved sys.* syscall names
 ```
+
+The journal, replay, the reference monitor, scheduling, and process lookup are
+not here. They live in aurora-capcompute (`replay/`, `journaled/`, `monitor/`,
+`internal/agent/`).
 
 If a type appears in an interface method, it belongs with that interface unless
 there is a stronger owner.
@@ -72,50 +61,35 @@ Allowed:
 
 ```text
 capcompute -> sys
-capcompute -> sys/replay
-sys/replay -> sys
-journaled -> sys
-memory -> capcompute
 ```
 
 If an import cycle appears, fix ownership. Do not add glue packages to hide it.
 
 ## Process Model
 
-`Kernel` owns compiled-program instantiation and active-process exclusivity.
-`ProcessTable` is the root-owned lookup boundary for live processes.
+`Program` owns one compiled image. Many processes may run one program.
 
 `Process` owns:
 
-- guest data
-- original `ProcessSpec` input
-- reusable Extism plugin instance
-- current dispatcher chain
+- the host-side credential (`Cred`)
+- its input and entrypoint
+- the reusable Extism plugin instance
+- the dispatcher it was created with
 
-Context passed into the syscall host function carries only the PID.
+`Resume` plants a dispatch closure, already bound to the process's credential
+and dispatcher, in the call context. The host function serves exactly the
+process that holds the CPU and needs no lookup.
 
-Yielded processes are retained for replay.
-Completed or failed processes are finalized and removed by the wrapping system.
+A stopped process is terminated permanently. The wrapping system decides when
+to create, resume, and close processes.
 
 ## Replay Model
 
 Guest code re-enters from the top.
 
-Replay is another invocation of the same process:
-
-- `Resume` runs the process against its dispatcher chain.
-- Yield keeps that dispatcher chain in the process.
-- async completion is handler/journal responsibility.
-
-Do not put async completion or journal-writing APIs on `Kernel`.
-
-Replay dispatcher behavior:
-
-- replay from tape when a record exists;
-- delegate upstream when no record exists;
-- record deterministic `StatusResult` and `StatusFailed`;
-- reset tape on `StatusYield`;
-- do not record `StatusYield`.
+Replay is another invocation of a fresh process with the same input and a
+dispatcher that serves recorded results. The processor does not know it is
+replaying. Do not put replay, async completion, or journal-writing APIs here.
 
 ## Package Names
 
@@ -126,7 +100,7 @@ Prefer concrete strategy names:
 ```go
 replay.Dispatcher
 journaled.Tape
-memory.ProcessTable
+monitor.Validator
 ```
 
 Avoid:
