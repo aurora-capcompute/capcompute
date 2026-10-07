@@ -61,7 +61,7 @@ Nothing is exported today (the journal→OTel exporter was removed unconsumed);
 nobody gets paged. Build the operational surface in aurora-dist — journal
 traces if wanted, and the metrics that page: terminal process counts by
 status *and cause*, abort-retry budget exhaustion, re-drive wall hits,
-pending-task age, timer reconcile lag, DB size, LLM call latency/errors. Alert
+pending-task age, timer fire lag, DB size, LLM call latency/errors. Alert
 set on: task nearing expiry unresolved, DB size threshold. The runbook explains
 how to resolve/deny tasks, retry/stop semantics, and the program
 drain-and-deprecate procedure the digest law implies. Lands across
