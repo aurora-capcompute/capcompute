@@ -21,7 +21,6 @@ Root `capcompute` owns:
 - `Config`, `Program`, `NewProgram` — compiling a program image
 - `Process`, `ProcessSpec`, `NewProcess` — instantiating a process
 - `Resume`, `ResumeHandle`, `ResumeResult` — one cooperative quantum
-- `PID` — the identity contract layers above key on
 - the ambient lockdown (`ambient.go`) and the syscall host function (`host.go`)
 
 Do not add root packages, public packages, examples, or old engine concepts unless

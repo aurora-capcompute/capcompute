@@ -22,10 +22,6 @@ type integrationPID struct {
 	id string
 }
 
-func (k integrationPID) PID() string {
-	return k.id
-}
-
 type integrationDispatcher struct{}
 
 func (integrationDispatcher) Dispatch(_ context.Context, _ integrationPID, syscall sys.Syscall, _ sys.Authorization) (sys.SyscallResult, error) {

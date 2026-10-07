@@ -22,14 +22,6 @@ var (
 	ErrProcessTerminated   = errors.New("process is terminated")
 )
 
-// PID is the identity contract layers above key on (taints, schedulers,
-// process maps): a credential that can name its process. The processor itself
-// runs anonymous processes and never requires it. (Compare Go's stdlib
-// `error` interface: the type and its one method share a name.)
-type PID[ID comparable] interface {
-	PID() ID
-}
-
 // Config contains everything needed to compile a program image.
 //
 // Image is the program image (an Extism manifest naming the wasm and static

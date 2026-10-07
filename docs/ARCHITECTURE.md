@@ -52,7 +52,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
 | `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit (one structure, two jobs) |
 | `Validator` / `Flow`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
-| `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
+| `Wrap` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
 | `pool` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
 | `core.scratch` (aurora-dispatchers) | **Session working directory** | get/put/list/search on the calling session's durable store — shared by the session's processes, private to the session, provenance-labelled (a home for a large read offloaded out of the model's context, and for data one process leaves for the next) |
 
@@ -176,7 +176,7 @@ governance and durability claims *provable* rather than aspirational.
    the process's taint downstream (`capability.WithTaint`) so drivers that
    store guest-derived data persist its provenance. Chain order: `Validator` →
    `Flow.Guard` → replay → `Flow.Stamp` → `Declassifier` →
-   drivers — encoded in `monitor.Stack.ForProcess`, so assembling a chain with a layer on the wrong side of the
+   drivers — encoded in `monitor.Wrap`, so assembling a chain with a layer on the wrong side of the
    replay boundary is a construction you cannot express, not a rule you must
    remember. Reserved
    markers (`sys.begin`/`sys.commit`) are exempt because they are processor

@@ -35,8 +35,6 @@ import (
 
 type advPID struct{ id string }
 
-func (p advPID) PID() string { return p.id }
-
 // advReport mirrors the guest's JSON observation.
 type advReport struct {
 	Status  string `json:"status"`
