@@ -284,8 +284,9 @@ lives by *level*:
   facts, standing context). **This is the shared-data home**; without it,
   "data shared between sessions" has no principled place.
 
-**Status:** no tenant store ships today. `core.memory` was built to the design
-below and then removed. `core.scratch` is the only store, and it is
+**Status:** no tenant store ships today, and the runtime has no tenant level:
+one deployment serves one tenant. `core.memory` was built to the design below
+and then removed. `core.scratch` is the only store, and it is
 per-session: it follows the same two laws, one level down.
 
 Two laws dictate the *form* a tenant store must take — it is not a

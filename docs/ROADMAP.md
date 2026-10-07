@@ -92,8 +92,8 @@ manifest files in aurora-dist.
 - **Multi-tenancy** — per-principal grants via attenuation tokens (macaroons,
   Birgisson et al., NDSS '14; the D3 policy layer), per-tenant ceilings and
   quotas, a silo-per-tenant control plane, metering folded from the journal.
-  The design intent stays: `TenantID` already threads scopes, leases, and task
-  tokens, and the dist already refuses manifests past a capability ceiling. Returns
+  The runtime has no tenant level today (one deployment is one tenant); the
+  dist already refuses manifests past a capability ceiling. Returns
   when a second tenant is real, as identity → policy → silo control plane, in
   that order.
 - **MCP driver** — bridging stdio MCP servers as granted syscalls
