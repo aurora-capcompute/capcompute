@@ -48,7 +48,7 @@ Lands in aurora-dist (`cmd/aurora-dist`, `internal/dist/api`).
 The SQLite file is the entire system state — the journal is the process, the
 task, the audit trail. Treat it accordingly: verify WAL mode and
 `busy_timeout` on open; continuous replication (Litestream) or a snapshot cron
-(`VACUUM INTO`) including the `instance_id` file beside it; and a restore
+(`VACUUM INTO`); and a restore
 drill that has actually been executed once, written into the runbook. Journal
 growth — unbounded by deliberate choice since compaction was removed — gets a
 gauge and an alert threshold plus a documented break-glass archive procedure;
@@ -135,7 +135,7 @@ manifest files in aurora-dist.
 | 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`); quotas were removed with the fair-share scheduler; the `Throttle` limiter was removed unconsumed |
 | 13 | Reference-monitor validation (grant-set + InputSchema) | **done** (`Validator`, `validate.go`) |
 | 14 | Deterministic simulation testing harness | **done** (`sim/`, crash matrices — all `_test.go`) |
-| 15 | Scheduler: priority, admission, virtual-actor activation | built, then **removed**; the runtime's scheduler is a first-come-first-served worker pool (`internal/agent/sched.go`); the supervisor was removed unconsumed |
+| 15 | Scheduler: priority, admission, virtual-actor activation | built, then **removed**; the runtime's scheduler is a first-come-first-served worker pool (`internal/agent/pool.go`); the supervisor was removed unconsumed |
 | 16 | Journal lifecycle: snapshot + compaction + retention | removed — built, then taken out as premature; see *Out of scope* |
 | 17 | Journal→OpenTelemetry exporter | built, then **removed** unconsumed; returns as dist ops (#29) |
 | 18 | Exactly-once effects: drivers honor idempotency keys | built, then **removed** — effects are at-least-once in the crash window; `NonIdempotentSyscalls` surfaces such a call for review instead |
