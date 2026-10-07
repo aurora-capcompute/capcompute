@@ -54,7 +54,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `Validator` / `Flow`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
 | `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
 | `Scheduler` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
-| `core.scratch` (aurora-dispatchers) | **tmpfs / `/tmp`** | get/put/list/search on a fresh per-process store — ephemeral, private to one process, never durable or shared (the home for a large read offloaded out of the model's context) |
+| `core.scratch` (aurora-dispatchers) | **Session working directory** | get/put/list/search on the calling session's durable store — shared by the session's processes, private to the session, provenance-labelled (a home for a large read offloaded out of the model's context, and for data one process leaves for the next) |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
 > (which would shadow Go's stdlib).
@@ -285,8 +285,8 @@ lives by *level*:
   "data shared between sessions" has no principled place.
 
 **Status:** no tenant store ships today. `core.memory` was built to the design
-below and then removed; `core.scratch` is the only store, and it is
-per-process.
+below and then removed. `core.scratch` is the only store, and it is
+per-session: it follows the same two laws, one level down.
 
 Two laws dictate the *form* a tenant store must take — it is not a
 special case, it is a driver:
