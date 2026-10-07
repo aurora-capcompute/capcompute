@@ -65,7 +65,7 @@ func dispatchSyscall(
 		// the guest must not observe it (journal-before-observe covers the
 		// indeterminate case too). Trap the quantum — the panic surfaces as a
 		// failed resume, the intent stays open in the journal, and the re-drive
-		// resolves it under the original idempotency key. A handler-level
+		// resolves it by the open-intent policy. A handler-level
 		// failure (a failed SyscallResult) still flows to the guest as a
 		// recoverable observation; only the machinery's own errors trap.
 		panic(fmt.Errorf("dispatch %s: %w", syscall.Name, err))

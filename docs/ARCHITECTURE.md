@@ -50,7 +50,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult` — and nothing else; what a syscall *means* is the runtime's, not the kernel's |
 | concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
 | chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
-| `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit + idempotency (one structure, three jobs) |
+| `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit (one structure, two jobs) |
 | `Validator` / `Flow`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
 | `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
 | `Scheduler` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
@@ -137,17 +137,17 @@ governance and durability claims *provable* rather than aspirational.
 3. **Journal write-ahead.** Two laws, one per direction of the boundary:
    **journal-before-execute** — an *intent* record is appended before a
    syscall's driver runs, so nothing changes the world without a trace; a
-   crash between execute and commit leaves a detectable *open intent*, and
-   the intent identity `(process, position, call-hash)` is the idempotency key
-   handed to the driver, stable across retries. **Journal-before-observe** —
+   crash between execute and commit leaves a detectable *open intent*.
+   **Journal-before-observe** —
    the *completion* record is appended before the result becomes observable
    to the guest, so replay is exact. (`yield` is never committed — it is a
    re-triable, blocking syscall whose intent stays open while the external
    task is pending.)
    *Enforced in code:* the intent/completion tape
    (the runtime's `journaled` package); an open intent met on replay is retried
-   under its original idempotency key or surfaced as `IndeterminateError`,
-   per `OpenIntentPolicy`; `journaled.Verify` checks the record structure.
+   (at-least-once — drivers get no idempotency key) or surfaced as
+   `IndeterminateError`, per `OpenIntentPolicy`; `journaled.Verify` checks the
+   record structure.
    The journal is not tamper-evident: the hash chain was removed.
 4. **Un-bypassable reference monitor.** An approval-required capability cannot
    execute without a resolved `Authorization`, and the monitor validates

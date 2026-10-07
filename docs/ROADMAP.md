@@ -129,7 +129,7 @@ manifest files in aurora-dist.
 | 4 | Capability attenuation helper | built, then **removed**; the dist's capability ceiling is a plain allowlist |
 | 5 | `process.spawn` syscall (sync-first child processes) | built, then **removed** with child processes; the name is no longer reserved |
 | 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
-| 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape, idempotency keys) |
+| 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape); the idempotency keys handed to drivers were later **removed** |
 | 10 | Guest-registered compensation + abort-retry | abort-retry **done** (section re-run); compensation built, then **removed** — no host served it (see §10) |
 | 11 | Information-flow labels + provenance (CaMeL-style) | **done** (labels, flow policy, `sys.declassify`) |
 | 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`); quotas were removed with the fair-share scheduler; the `Throttle` limiter was removed unconsumed |
@@ -138,13 +138,13 @@ manifest files in aurora-dist.
 | 15 | Scheduler: priority, admission, virtual-actor activation | built, then **removed**; the runtime's scheduler is a first-come-first-served worker pool (`internal/agent/sched.go`); the supervisor was removed unconsumed |
 | 16 | Journal lifecycle: snapshot + compaction + retention | removed — built, then taken out as premature; see *Out of scope* |
 | 17 | Journal→OpenTelemetry exporter | built, then **removed** unconsumed; returns as dist ops (#29) |
-| 18 | Exactly-once effects: drivers honor idempotency keys | **done** (the `memory` store's activity memory, under `core.scratch`) |
+| 18 | Exactly-once effects: drivers honor idempotency keys | built, then **removed** — effects are at-least-once in the crash window; `NonIdempotentSyscalls` surfaces such a call for review instead |
 | 19 | Reservation / TCC as a pattern | **removed** with compensation — the pattern needs `sys.compensate` (see §19) |
 | 20 | Approval-composable compensation (yielding inverse) | built, then **removed** with compensation |
 | 21 | Deterministic rollback matrix | built, then **removed** with compensation; abort and guest-failure re-run tests remain |
 | 22 | Journaled time & randomness (`sys.now`, `sys.random`) | **done** (worldDispatcher below replay) |
 | 24 | Plan/execute program (CaMeL) | **done** (camel: quarantined planner, `$N` routing) |
-| 25 | Attempt-scoped idempotency keys across rollbacks | **done** (records carry their writing revision; keys derive from the record) |
+| 25 | Attempt-scoped idempotency keys across rollbacks | built, then **removed** with the keys (records still carry their writing revision) |
 
 Items 7 (snapshot/checkpoint), 8 (chat sources as drivers), and 23
 (macaroons) moved to *Out of scope* with their return triggers.
