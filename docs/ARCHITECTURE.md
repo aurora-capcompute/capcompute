@@ -341,8 +341,9 @@ v1*, replay must still produce a consistent process — and that is not free:
 
 **What we owe the design (decide before it bites):**
 
-1. **Version the program in the journal.** Every journal records the program
-   version that produced it. Replay knows which code it is replaying against.
+1. **Pin the program to the process.** Every process records the digest of the
+   program that wrote its journal, and the runtime never runs it under another
+   (pinned replay, below). The processor refuses any syscall from another ABI.
 2. **Define the compatibility contract.** State plainly which changes are
    replay-safe (pure logic, added tail capabilities) and which are breaking
    (reordering/removing/retyping syscalls). This is the guest-author's law, the
