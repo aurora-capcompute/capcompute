@@ -78,9 +78,9 @@ up, abort, or ask). Lands in aurora-dispatchers (`openaillm`).
 ### 31. Deploy shape: single-writer posture, manifests, playbooks
 
 Make the honest posture explicit and easy: **replicas=1**, documented — SQLite
-is single-writer and the lease + stable-instance-id design is built for one
-live writer; a second replica correctly blocks on leases rather than
-corrupting anything. Ship a systemd unit and a k8s manifest (stateful volume
+is single-writer, and the runtime folds the log into memory once, at boot, so
+one runtime owns one store. A second replica on the same store would not see
+the first one's sessions. Ship a systemd unit and a k8s manifest (stateful volume
 for the data dir, SIGTERM grace matching the runtime's Close timeout).
 Programs arrive by CI dropping built `.wasm` into the programs directory; the
 poller and the digest law do the rest. Secrets stay env-injected
