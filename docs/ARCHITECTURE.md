@@ -53,7 +53,7 @@ no preemption; no `Interrupt`: yields are cooperative).
 | `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit (one structure, two jobs) |
 | `Validator` / `Flow`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
 | `Stack` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
-| `Scheduler` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
+| `pool` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
 | `core.scratch` (aurora-dispatchers) | **Session working directory** | get/put/list/search on the calling session's durable store — shared by the session's processes, private to the session, provenance-labelled (a home for a large read offloaded out of the model's context, and for data one process leaves for the next) |
 
 > Package note: the syscall vocabulary lives in package `sys`, not `syscall`
@@ -249,7 +249,7 @@ consumer needs it. Design decisions, with prior art:
 
 Scheduling is runtime policy, not a processor primitive: the processor's whole
 contribution is `Resume` (one cooperative quantum). The scheduler lives in
-aurora-capcompute (`internal/agent/sched.go`), where its only consumer is: a
+aurora-capcompute (`internal/agent/pool.go`), where its only consumer is: a
 fixed pool of workers, first-come-first-served, with a wall-clock deadline per
 quantum and no residency — every quantum starts a fresh instance. A fair-share
 scheduler, an OTP-style supervisor, and a delay-only `Throttle` rate limiter
