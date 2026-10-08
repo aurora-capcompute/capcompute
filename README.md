@@ -1,182 +1,117 @@
 # capcompute
 
-**A tiny "operating system" for running AI‑agent code safely.** `capcompute` is a
-Go library that runs WebAssembly (Wasm) programs as sandboxed **processes** whose
-*only* way to affect the outside world is by asking the host for permission — one
-call at a time, all recorded.
+`capcompute` is a Go library that runs WebAssembly (Wasm) programs as
+**processes**. A process can affect the outside world only through one host
+function, the **syscall**. The host answers each syscall through a dispatcher
+that the application supplies.
 
-> New here? Read the next two sections and you'll understand what this is and why
-> it exists. Then jump to [Quick start](#quick-start-5-minutes) to build and test
-> it locally.
+It is the processor of a small operating system:
 
----
+- A Wasm module is a **program**.
+- A running instance is a **process**.
+- Host features (network, LLM calls, storage) are **syscalls**.
 
-## What is this, in plain words?
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the model and its laws.
 
-Imagine you let an AI agent run real commands — restart a server, charge a card,
-delete a file. Three things immediately go wrong:
+## Where it fits
 
-1. **You can't trust the logs.** The agent prints whatever it wants. You need a
-   record of what it *actually did* that it can't skip or fake.
-2. **Crashes double‑charge you.** It dies at step 7 of 12, and step 3 was a
-   payment. You restart it… and steps 1–6 run again. You just paid twice.
-3. **The agent guards its own gate.** "A human must approve deletes" lives in the
-   agent's prompt — which the AI controls. The prisoner writes the prison rules.
-
-`capcompute` is the processor those answers are built on:
-
-- **Every side effect goes through one recorded gate** the program can't bypass —
-  an un‑forgeable audit trail.
-- **Crashes replay to the exact instruction** without re‑running effects that
-  already committed — no double‑charges.
-- **Approval lives outside the sandbox**, where the AI can't approve for itself.
-
-It's a **library, not an app** — you link it into your own Go program. Think of it
-as the "kernel" of a small operating system: Wasm modules are **programs**, running
-instances are **processes**, and host features (network, LLM calls, storage) are
-**syscalls** the processor mediates. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-for the full OS model.
-
-## Where this fits in the Aurora system
-
-`capcompute` is the bottom layer of a family of repos (all under the
-[`aurora-capcompute`](https://github.com/aurora-capcompute) org) that together run
-AI agents safely:
+`capcompute` is the bottom layer of the Aurora repos:
 
 ```
-        you (a human)
-              │
-   aurora-cli / aurora-slack-connector      ← clients you talk to
+   aurora-cli / aurora-slack-connector      clients
               │  HTTP /v1
-         aurora-dist                         ← the server (one binary you run)
-              │  assembled from…
+         aurora-dist                         the server binary
+              │
    ┌──────────┴──────────┐
- aurora-capcompute    aurora-dispatchers     ← orchestration runtime + capability drivers
+ aurora-capcompute    aurora-dispatchers     runtime + capability drivers
    └──────────┬──────────┘
-              │  both built on
-         capcompute                          ◀── YOU ARE HERE (the processor)
+         capcompute                          the processor (this repo)
 
-   aurora-brains  →  the agent "programs" (Wasm) that run inside
+   aurora-brains                             the Wasm programs that run inside
 ```
 
-- **capcompute (this repo)** — the processor: sandboxing, the one syscall gate,
-  deterministic execution, resource caps.
-- **[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)** —
-  the orchestration runtime built on top: the reference monitor (grants, flow
-  policy), replay, the journal, sessions, retries, approvals.
-- **[aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers)** —
-  the concrete drivers that actually make HTTP calls, read files, call an LLM.
-- **[aurora-brains](https://github.com/aurora-capcompute/aurora-brains)** — the
-  Wasm agent programs (the "cognition") that run *as processes* inside this processor.
-- **[aurora-dist](https://github.com/aurora-capcompute/aurora-dist)** — bundles all
-  of the above into one runnable server.
+- **capcompute**: isolation, the one syscall gate, deterministic execution,
+  resource caps.
+- **[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)**:
+  the runtime. It owns the reference monitor (grants, flow policy), replay, the
+  journal, sessions, retries and approvals.
+- **[aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers)**:
+  the drivers that make HTTP calls, run allowlisted commands and call an LLM.
+- **[aurora-brains](https://github.com/aurora-capcompute/aurora-brains)**: the
+  agent programs.
+- **[aurora-dist](https://github.com/aurora-capcompute/aurora-dist)**: one server
+  that assembles all of the above.
 
-You rarely use `capcompute` on its own. It's the engine the rest is built from.
+## What it gives you
 
-## What it does for you (features)
-
-| Feature | The problem it solves |
+| Property | Effect |
 | --- | --- |
-| **One syscall gate, zero ambient authority** — a program's only way to affect anything is the host syscall; no filesystem, no network, no env | Untrusted / LLM‑written code can't reach anything you didn't wire into its dispatcher |
-| **Deterministic execution** — the WASI clock and RNG are processor‑pinned; a fresh instance observes the identical sequence | The layer above can rebuild a crashed process by replaying its journal to the exact instruction |
-| **Resource caps** — per‑process memory limit and resume deadline | A hostile or buggy guest can't exhaust the host or spin forever |
-| **Yield / resume** — a process can pause on outside work (an approval, a timer) and be resumed later | Human‑in‑the‑loop and long waits without holding a thread |
+| **No ambient authority.** The syscall is the only way out: no filesystem, no network, no environment. | Code that an LLM wrote reaches only what the dispatcher serves. |
+| **Deterministic execution.** The processor owns the WASI clock and random source. A fresh instance sees the same sequence. | The layer above can rebuild a process by replaying its journal. |
+| **Resource caps.** A memory cap per program (`Config.MaxMemoryPages`) and a deadline per quantum (`ProcessSpec.ResumeTimeout`). | A guest cannot exhaust the host or loop forever. |
+| **Yield and resume.** A syscall can yield for outside work, such as an approval or a timer. | A process can wait without holding a thread. |
 
-The governed‑execution features built *on* this gate — the recorded
-journal, exactly‑once replay, savepoints,
-capability grants and information‑flow control — live in
-[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
-(its `monitor`, `replay`, and `journaled` packages).
+The journal, replay, savepoints, grants and flow control are built on this
+gate in aurora-capcompute (`monitor/`, `replay/`, `journaled/`).
 
-## Quick start (5 minutes)
+## Quick start
 
-**Prerequisites:** Go 1.26+. Nothing else — the end‑to‑end guest tests build
-their Wasm fixtures with the same `go` that runs them.
+Requirement: Go 1.26 or later. The guest tests build their Wasm fixtures with
+the same `go` toolchain.
 
 ```sh
-git clone https://github.com/aurora-capcompute/capcompute
-cd capcompute
-
-go build ./...      # compile everything
-go vet ./...        # static checks
-go test ./...       # run the test suite
+go build ./...
+go vet ./...
+go test ./...          # -short skips the Wasm guest tests
 ```
 
-Running in a sandbox where the default Go cache isn't writable? Point it somewhere
-writable:
+If the default Go cache is not writable, set `GOCACHE`:
 
 ```sh
 GOCACHE=/tmp/capcompute-go-build go test ./...
 ```
 
-Run only the fast unit tests, or a single package:
+This is a library. The only runnable Wasm is the test fixtures in `testdata/`.
 
-```sh
-go test -short ./...                      # skip the slow Wasm guest tests
-go test ./sys/                            # one package
+## Lifecycle
+
+A host uses three calls: `NewProgram`, `NewProcess` and `Resume`.
+
+```go
+// 1. Compile a program from an Extism manifest.
+program, err := capcompute.NewProgram(ctx, capcompute.Config{
+    Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: "plugin.wasm"}}},
+    PluginConfig: extism.PluginConfig{EnableWasi: true},
+})
+defer program.Close(ctx)
+
+// 2. Create a process. Input, credential and dispatcher are explicit.
+//    The process inherits nothing.
+process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[Run]{
+    Input:      json.RawMessage(`{"task":"example"}`),
+    Entrypoint: "run",
+    Cred:       Run{ID: "proc-1"}, // host-side identity; the guest never sees it
+    Dispatcher: myDispatcher{},
+})
+defer process.Close(ctx)
+
+// 3. Run one quantum and read its single result.
+handle, _ := capcompute.Resume(ctx, process)
+result := <-handle.Results()
+switch result.Status {
+case capcompute.ResumeCompleted: // the guest finished
+case capcompute.ResumeYielded:   // the guest waits for outside work
+case capcompute.ResumeStopped:   // cancelled; create a new process to continue
+case capcompute.ResumeFailed:    // apply your error policy
+}
 ```
 
-The integration test builds a real Wasm guest and drives it through completed /
-yielded / failed / crash‑replay states:
+`Resume` binds a dispatch closure to the process's credential and dispatcher.
+The host function calls that closure, so it needs no process lookup.
 
-```sh
-go test -run TestGuest ./...
-# internally it builds the guest fixture with:
-#   GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared \
-#     -o guest.wasm ./testdata/integration_guest
-```
+### The dispatcher
 
-There is **no `go run`** — this is a library. The only runnable Wasm artifacts are
-the guest fixtures under `testdata/`, and the Go tests build and drive them.
-
-## How you use it (the lifecycle)
-
-A host application uses three calls — `NewProgram`, `NewProcess`, `Resume`:
-
-1. **Compile a program** from an image (an Extism Wasm manifest):
-
-   ```go
-   program, err := capcompute.NewProgram(ctx, capcompute.Config{
-       Image:        extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: "plugin.wasm"}}},
-       PluginConfig: extism.PluginConfig{EnableWasi: true},
-   })
-   defer program.Close(ctx)
-   ```
-
-2. **Instantiate a process** from it (`posix_spawn` semantics: explicit input,
-   credential, and syscall dispatcher — nothing inherited):
-
-   ```go
-   process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[Run]{
-       Input:      json.RawMessage(`{"task":"example"}`),
-       Entrypoint: "run",
-       Cred:       Run{ID: "proc-1"}, // host-side identity, never visible to the guest
-       Dispatcher: myDispatcher{},    // handles this process's syscalls
-   })
-   defer process.Close(ctx)
-   ```
-
-3. **Resume** it and read the single result:
-
-   ```go
-   handle, _ := capcompute.Resume(ctx, process)
-   result := <-handle.Results()
-   switch result.Status {
-   case capcompute.ResumeCompleted: // the guest finished
-   case capcompute.ResumeYielded:   // paused on outside work — resume later
-   case capcompute.ResumeStopped:   // cancelled — spawn afresh before resuming
-   case capcompute.ResumeFailed:    // apply your error policy
-   }
-   ```
-
-`Resume` runs the guest in a goroutine and delivers exactly one
-`ResumeResult`; the dispatch closure it planted in the call context — already
-bound to that process's credential and dispatcher — is what the syscall host
-function calls, so there is no other lookup.
-
-### The one piece you provide
-
-**A dispatcher** — application code that answers one process's syscalls:
+The application answers a process's syscalls:
 
 ```go
 func (myDispatcher) Dispatch(ctx context.Context, cred Run, call sys.Syscall, auth sys.Authorization) (sys.SyscallResult, error) {
@@ -191,64 +126,47 @@ func (myDispatcher) Dispatch(ctx context.Context, cred Run, call sys.Syscall, au
 }
 ```
 
-A dispatcher answers one question — what does this syscall do — and nothing
-else. What a syscall *means* (which cases it has, what its results are
-labelled, what may not flow into it, whether a human must approve it) is a
-policy question, and the kernel deliberately has no vocabulary for it: that
-belongs to whatever runtime is stacked on top.
+The dispatcher decides what a syscall does. Policy (which operations exist,
+labels, flow rules, approval) belongs to the runtime above. The processor has
+no vocabulary for it.
 
-## The syscall contract (guest ↔ host)
+## The syscall contract
 
-A guest imports one host function and sends it a request:
+A guest imports one host function:
 
 ```go
 //go:wasmimport extism:host/compute syscall
 func hostSyscall(uint64) uint64
 ```
 
-The request and response are an **ABI‑v4 JSON envelope** (`sys.ABIVersion == 4`):
-a `sys.Syscall` in, a `sys.SyscallResult` out — the same types, and the same
-JSON, that the dispatcher chain and the journal already speak. A response has
-one of three statuses:
+The request is a `sys.Syscall` and the response is a `sys.SyscallResult`, both
+as JSON (ABI version 4, `sys.ABIVersion`). The journal and the dispatcher chain
+use the same types. A response has one of three statuses:
 
-- `result` — the syscall completed and returned a value;
-- `yield` — the host needs outside work before the guest can continue;
-- `failed` — carrying a machine‑readable errno (`denied`, `expired`, `not_found`,
-  `invalid_args`, `transient`, `internal`, `bad_abi`) plus a message.
+- `result`: the syscall completed and returned a value.
+- `yield`: the host needs outside work before the guest can continue.
+- `failed`: an errno (`denied`, `expired`, `not_found`, `invalid_args`,
+  `transient`, `internal`, `bad_abi`) and a message.
 
-The guest decides what to do with the response and returns from its exported
-function with `{"status":"completed"}` or `{"status":"yielded"}`. Some syscall
-names are reserved by the processor: `sys.begin`, `sys.commit`, `sys.input`,
-`sys.output`, `sys.log`, `sys.abort`, `sys.timer`, `sys.declassify`, `sys.now`,
-`sys.random`.
+The guest returns `{"status":"completed"}` or `{"status":"yielded"}` from its
+exported function. The processor reserves these names: `sys.begin`,
+`sys.commit`, `sys.input`, `sys.output`, `sys.log`, `sys.abort`, `sys.timer`,
+`sys.declassify`, `sys.now`, `sys.random`.
 
-## What this library deliberately does **not** own
+## Scope
 
-`capcompute` is intentionally small. It does *not* own job queues, schedulers of
-*when* to resume, durable databases, async completion, exporters, or
-product‑specific agent policy. Those belong to the system wrapping it — that's
-what [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)
-and [aurora-dist](https://github.com/aurora-capcompute/aurora-dist) are.
-The rule is visible in the tree: every `.go` file here is either consumed
-processor API or a `_test.go` file — built‑ahead code with no consumer gets
-removed (design kept in docs) until a consumer forces it back.
+`capcompute` does not own queues, schedulers, stores, replay, async completion
+or agent policy. The systems on top own them. Every `.go` file here is
+processor API that something uses, or a test. Code with no consumer is
+removed.
 
-## Project layout
+## Layout
 
 ```
-processor.go     Program, Process, NewProcess, Resume — the processor
-host.go          the single Extism host function + syscall dispatch
-ambient.go       deterministic clock + RNG (so replay above is exact)
-sys/             the syscall vocabulary: Syscall, SyscallResult, Dispatcher, errno
-                 — and, via their JSON tags, the ABI-v4 wire envelope itself
-docs/            ARCHITECTURE.md (the OS model), ROADMAP.md
-testdata/        the smallest Wasm guest fixtures used by integration tests
+processor.go   Program, Process, NewProcess, Resume
+host.go        the host function and syscall dispatch
+ambient.go     the deterministic clock and random source
+sys/           Syscall, SyscallResult, Dispatcher, errno: the ABI v4 envelope
+docs/          ARCHITECTURE.md (the model), ROADMAP.md
+testdata/      Wasm guest fixtures for the integration tests
 ```
-
-## Related repos
-
-- [aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute) — the orchestration runtime built on this processor
-- [aurora-dispatchers](https://github.com/aurora-capcompute/aurora-dispatchers) — the capability drivers
-- [aurora-brains](https://github.com/aurora-capcompute/aurora-brains) — the Wasm agent programs that run inside
-- [aurora-dist](https://github.com/aurora-capcompute/aurora-dist) — the runnable server that bundles it all
-- [aurora-cli](https://github.com/aurora-capcompute/aurora-cli) — the terminal client

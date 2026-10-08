@@ -1,247 +1,125 @@
 # Roadmap
 
-The OS model is built and adversarially proven (see the ledger at the bottom;
-`ARCHITECTURE.md` for the model and its invariants). The current focus is getting it to production in the
-narrowest honest posture: **a single-tenant deployment with one communication
-channel — the `/v1` HTTP API — as the trust boundary**. One organization, one
-runtime instance, one SQLite file, one API surface. Multi-tenancy, additional
-channels, and scale-out are deliberately parked (see *Out of scope*), because
-their hard parts — per-principal grants, pooled stores, placement — only pay
-off once a single tenant runs in production.
+The OS model exists (the ledger at the end lists it, and `ARCHITECTURE.md`
+describes the model and its laws). The current goal is production in the narrowest posture:
+**one tenant, and one channel, the `/v1` HTTP API, as the trust boundary**. One
+organization, one runtime instance, one SQLite file. Multi-tenancy, more
+channels and scale-out are parked until a single tenant runs in production.
 
-Score = impact (H/M/L) × effort (S/M/L). Items are sequenced and small enough
-to land alone.
+Score = impact (H/M/L) × effort (S/M/L). Each item can land alone.
 
-## Now: production, single-tenant, one channel
+## Now: production, one tenant, one channel
 
 | # | Item | Impact | Effort | Status |
 |---|------|--------|--------|--------|
-| 26 | Channel boundary: bearer auth on `/v1` | H | S | open |
-| 27 | HTTP server hardening (timeouts, limits, `/healthz`) | M | S | open |
-| 28 | Durability ops: backup + tested restore | H | S–M | open |
-| 29 | Operational metrics, alerts, runbook | H | M | open |
+| 26 | Bearer auth on `/v1` | H | S | open |
+| 27 | HTTP server timeouts | M | S | open |
+| 28 | Backup and a tested restore | H | S–M | open |
+| 29 | Metrics, alerts, runbook | H | M | open |
 | 30 | LLM spend budget per process | M–H | S | open |
-| 31 | Deploy shape: single-writer posture, manifests, playbooks | M | S | open |
+| 31 | Deploy shape: one writer, manifests, playbooks | M | S | open |
 
-### 26. Channel boundary: bearer auth on `/v1`
+### 26. Bearer auth on `/v1`
 
-The API deliberately has no principal authentication (the single-trusted-client
-posture); today the socket is the credential. Production makes the one channel
-an actual boundary: a static bearer token (`AURORA_API_TOKEN`, constant-time
-compare) required on every `/v1` request, TLS terminated by a reverse proxy in
-front, and a loopback/cluster-internal bind by default. Task resolution keeps
-its own second factor — the per-task HMAC resolution token — unchanged. This is
-one principal, not many: per-principal grants stay parked with multi-tenancy.
-Lands in aurora-dist (`internal/dist/api` middleware + config).
+The API has no principal authentication today: the socket is the credential.
+Require a static bearer token (`AURORA_API_TOKEN`, constant-time compare) on
+every `/v1` request, terminate TLS in a reverse proxy, and bind to loopback or a
+cluster-internal address by default. Task resolution keeps its own per-task
+HMAC token. This is one principal. Per-principal grants stay parked with
+multi-tenancy. Lands in aurora-dist (`internal/dist/api`).
 
-### 27. HTTP server hardening
+### 27. HTTP server timeouts
 
-`http.Server` currently runs without timeouts. Add `ReadHeaderTimeout`,
-`ReadTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes`, and request
-body size limits on the POST endpoints. `GET /healthz` already ships (the
-process-level check a supervisor needs — deeper health is the metrics' job).
-Lands in aurora-dist (`cmd/aurora-dist`, `internal/dist/api`).
+`http.Server` sets no timeouts. Add `ReadHeaderTimeout`, `ReadTimeout`,
+`WriteTimeout`, `IdleTimeout` and `MaxHeaderBytes`. Request bodies are already
+capped at 4 MiB, and `GET /healthz` already exists. Lands in aurora-dist
+(`cmd/aurora-dist`).
 
-### 28. Durability ops: backup + tested restore
+### 28. Backup and a tested restore
 
-The SQLite file is the entire system state — the journal is the process, the
-task, the audit trail. Treat it accordingly: verify WAL mode and
-`busy_timeout` on open; continuous replication (Litestream) or a snapshot cron
-(`VACUUM INTO`); and a restore
-drill that has actually been executed once, written into the runbook. Journal
-growth — unbounded by deliberate choice since compaction was removed — gets a
-gauge and an alert threshold plus a documented break-glass archive procedure;
-a real lifecycle feature returns only when the gauge says so. Mostly docs and
-deployment config; small verification bits in aurora-dist's store.
+The SQLite file is the whole system state. The store already opens it with WAL,
+`busy_timeout` and `synchronous=FULL`. Add continuous replication (Litestream)
+or a snapshot job (`VACUUM INTO`), and run one restore drill and write it into
+the runbook. The journal grows without bound. Add a size gauge, an alert
+threshold and a documented archive procedure. A retention feature returns only
+when the gauge requires it.
 
-### 29. Operational metrics, alerts, runbook
+### 29. Metrics, alerts, runbook
 
-Nothing is exported today (the journal→OTel exporter was removed unconsumed);
-nobody gets paged. Build the operational surface in aurora-dist — journal
-traces if wanted, and the metrics that page: terminal process counts by
-status *and cause*, abort-retry budget exhaustion, re-drive wall hits,
-pending-task age, timer fire lag, DB size, LLM call latency/errors. Alert
-set on: task nearing expiry unresolved, DB size threshold. The runbook explains
-how to resolve/deny tasks, retry/stop semantics, and the program
-drain-and-deprecate procedure the digest law implies. Lands across
-aurora-capcompute (counters at the seams) and aurora-dist (exposition).
+The server exports no metrics today. Add the metrics that page: counts of finished processes
+by status and cause, abort-retry budget exhaustion, re-drive walls, pending task
+age, timer fire lag, DB size, LLM latency and errors. Alert on tasks near
+expiry and on DB size. The runbook covers task resolution, retry and stop, and
+the program drain procedure that the digest binding requires. Lands across
+aurora-capcompute (counters) and aurora-dist (exposition).
 
 ### 30. LLM spend budget per process
 
-Loops are bounded (abort-retry budget, re-drive wall, scheduler quotas);
-money is not. A per-grant budget in the `openaillm` driver settings — max
-calls and/or max tokens per process — enforced in the driver, exceeded budget
-returned as a failed result with a clear errno the program can react to (wrap
-up, abort, or ask). Lands in aurora-dispatchers (`openaillm`).
+The abort-retry budget and the re-drive wall bound loops. Nothing bounds spend.
+Add a per-grant budget to the `openaillm` settings (max calls or max tokens per
+process). The driver enforces it and returns a failed result with a clear errno,
+so the program can wrap up or abort. Lands in aurora-dispatchers (`openaillm`).
 
-### 31. Deploy shape: single-writer posture, manifests, playbooks
+### 31. Deploy shape
 
-Make the honest posture explicit and easy: **replicas=1**, documented — SQLite
-is single-writer, and the runtime folds the log into memory once, at boot, so
-one runtime owns one store. A second replica on the same store would not see
-the first one's sessions. Ship a systemd unit and a k8s manifest (stateful volume
-for the data dir, SIGTERM grace matching the runtime's Close timeout).
-Programs arrive by CI dropping built `.wasm` into the programs directory and a
-restart; the digest law does the rest. Secrets stay env-injected
-(`AURORA_TASK_SECRET`, provider keys); rotation = restart. Docs plus two small
-manifest files in aurora-dist.
+State the posture: **one replica**. SQLite has one writer, and the runtime
+folds the log into memory once, at boot, so one runtime owns one store. Ship a
+systemd unit and a Kubernetes manifest (a persistent volume for the data
+directory, a SIGTERM grace period that matches the runtime's close timeout).
+Run the server as a dedicated user with least-privilege credentials, and limit
+egress in the platform: this is where `core.command` is confined. Programs
+arrive when CI drops built `.wasm` files into the programs directory and the
+server restarts. Secrets come from the environment, and rotation is a restart.
 
 ## Out of scope (parked, with return triggers)
 
-- **Multi-tenancy** — per-principal grants via attenuation tokens (macaroons,
-  Birgisson et al., NDSS '14; a policy layer), per-tenant ceilings and
-  quotas, a silo-per-tenant control plane, metering folded from the journal.
-  The runtime has no tenant level today (one deployment is one tenant). Returns
-  when a second tenant is real, as identity → policy → silo control plane, in
-  that order.
-- **MCP driver** — bridging stdio MCP servers as granted syscalls
-  (`mcp.<server>.<tool>`). Dropped for now: it multiplies the external surface
-  before the first deployment needs it, and its open-ended tool lists sit
-  awkwardly in a static grant set. Returns with the first real
-  deployment that needs a tool only MCP provides, behind explicit per-server
-  tool lists.
-- **Additional channels** (chat sources as inbound drivers, streaming APIs) —
-  one channel is the boundary; a second channel is a second boundary and comes
-  with the product need, not before.
-- **Snapshot/checkpoint to bound replay cost** — replay cost is not a measured
-  problem; the single-level-store move waits for evidence.
-- **Journal lifecycle (retention/archival)** — removed once already as
-  premature machinery; returns as a product/compliance feature when #28's
-  growth gauge demands it.
-- **Async spawn / pooled multi-tenant stores / scale-out placement** — density
-  and concurrency optimizations with no current customer.
+- **Multi-tenancy:** per-principal grants (attenuation tokens, macaroons), a
+  policy layer, per-tenant quotas, a silo per tenant, metering from the journal.
+  Returns when a second tenant is real.
+- **Per-command OS sandbox** for `core.command`: bubblewrap or Landlock on
+  Linux, `sandbox-exec` on macOS, with read, write and network policy per
+  command, and fail closed. Today the author vouches for each command, and the deployment
+  confines the server. Returns when one of these is real:
+  - a command runs code that the model wrote, or takes code or file paths as a
+    slot (run such code as a Wasm guest instead, if possible).
+  - more than one tenant shares a server.
+  - commands in one deployment need different rights.
+- **MCP driver** (`mcp.<server>.<tool>`). Its open-ended tool lists do not fit
+  a static grant set. Returns when a deployment needs a tool that only MCP
+  provides, with explicit per-server tool lists.
+- **More channels** (more inbound connectors, streaming APIs). A second channel
+  is a second boundary. Returns with the product need.
+- **Snapshots** to bound replay cost. Returns when replay cost is measured as a
+  problem.
+- **Journal retention and archival.** Returns when #28's gauge requires it.
+- **Async spawn, pooled stores, scale-out placement.** No current customer.
 
-## Ledger — the OS model, built
+## Ledger: the OS model
 
-> File references below predate the 2026-07-19 charter passes: the monitor,
-> replay, journal, scheduler, and DST harness now live in aurora-capcompute
-> (`monitor/`, `replay/`, `journaled/`, `internal/agent/`, `sim/`). The processor
-> library keeps the process core and `sys`.
+Git history keeps the design of every removed item.
 
 | # | Item | Status |
 |---|------|--------|
-| 0 | Ambient-surface lockdown (the processor owns guest WASI sources) | **done** (`ambient.go`, `ErrAmbientAuthority`) |
-| 1 | Journal program-versioning + replay compatibility check | **done** (`journaled.Header`, `ReplayIncompatibleError`) |
-| 2 | Law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the abort/savepoint and runtime tests cover the rest in practice |
-| 3 | Hash-chained journal (tamper-evident audit) | built, then **removed** (2026-08-15); `journaled.Verify` checks structure only |
-| 4 | Capability attenuation helper | built, then **removed**; so was the dist's capability ceiling |
-| 5 | `process.spawn` syscall (sync-first child processes) | built, then **removed** with child processes; the name is no longer reserved |
-| 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
-| 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape); the idempotency keys handed to drivers were later **removed** |
-| 10 | Guest-registered compensation + abort-retry | abort-retry **done** (section re-run); compensation built, then **removed** — no host served it (see §10) |
-| 11 | Information-flow labels + provenance (CaMeL-style) | **done** (labels, flow policy, `sys.declassify`) |
-| 12 | Resource management (mem cap, resume deadline, quotas) | **done** (`MaxMemoryPages`/`ResumeTimeout`); quotas were removed with the fair-share scheduler; the `Throttle` limiter was removed unconsumed |
-| 13 | Reference-monitor validation (grant-set + InputSchema) | **done** (`Validator`, `validate.go`) |
-| 14 | Deterministic simulation testing harness | **done** (`sim/`, crash matrices — all `_test.go`) |
-| 15 | Scheduler: priority, admission, virtual-actor activation | built, then **removed**; the runtime's scheduler is a first-come-first-served worker pool (`internal/agent/pool.go`); the supervisor was removed unconsumed |
-| 16 | Journal lifecycle: snapshot + compaction + retention | removed — built, then taken out as premature; see *Out of scope* |
-| 17 | Journal→OpenTelemetry exporter | built, then **removed** unconsumed; returns as dist ops (#29) |
-| 18 | Exactly-once effects: drivers honor idempotency keys | built, then **removed** — effects are at-least-once in the crash window |
-| 19 | Reservation / TCC as a pattern | **removed** with compensation — the pattern needs `sys.compensate` (see §19) |
-| 20 | Approval-composable compensation (yielding inverse) | built, then **removed** with compensation |
-| 21 | Deterministic rollback matrix | built, then **removed** with compensation; abort and guest-failure re-run tests remain |
-| 22 | Journaled time & randomness (`sys.now`, `sys.random`) | **done** (worldDispatcher below replay) |
-| 24 | Plan/execute program (CaMeL) | **done** (camel: quarantined planner, `$N` routing) |
-| 25 | Attempt-scoped idempotency keys across rollbacks | built, then **removed** with the keys (records still carry their writing revision) |
-
-Items 7 (snapshot/checkpoint), 8 (chat sources as drivers), and 23
-(macaroons) moved to *Out of scope* with their return triggers.
-
-### 10. Guest-registered compensation + abort-retry
-
-> **Status:** compensation was removed (2026-08-16) — no host served
-> `sys.compensate`. What remains is the re-run: `sys.abort`, or a failure
-> inside an open section, forks the journal at the section's `sys.begin` and
-> re-runs it live; nothing is undone. The text below is the design record.
-
-`sys.begin`/`sys.commit` are **redo scopes**, not savepoints — they can only
-re-execute, never undo, and re-execution amplifies at-least-once. The undo layer is guest-authored, in the log: `sys.compensate`
-registers an effect's inverse (a deferred syscall, journaled with concrete
-args), and `sys.abort{reason, retry_seconds}` rolls the open scope back —
-registered compensations execute newest-first (journaled, idempotency-keyed,
-crash-resumable), then the scope retries after the declared delay (forking at
-its `sys.begin`) or the process stops as `compensated`. A failed compensation
-fails the process with the rollback report; capabilities stay pure access
-control (an earlier metadata-driven design was replaced by this one).
-
-The rollback runs only when resuming is provably impossible — everything else
-resumes. A host interruption and a guest **failure inside an open section**
-alike re-drive by replay
-under the *same revision*: recorded effects are served, an open intent
-re-drives under its original key, and the registrations the cut-off guest was
-about to make land in the journal — which is what makes registering an undo
-*after* its effect safe (the rollback cannot run until every registration
-reachable from the recorded history is durable). A failure whose re-drive
-appends nothing has hit a deterministic wall; only then is the revision
-**abandoned**: the registered compensations run, then the process reports
-failed with its original error. An **un-bracketed** failure is final on first
-strike (decided 2026-07-19): the section is the guest's declared re-drive
-scope, and to a parent a delegated child's failure — transient blip or not —
-is an observable syscall outcome, journaled and handled like any failed
-driver call; retry policy belongs to the program and the human, not the
-runtime. A **stop** rolls back immediately — the
-human asked for an end, not a resume — and an explicit **restart** abandons
-the whole revision (top-level registrations included) before re-running from
-scratch.
-
-*Abandoning a revision* — deciding it can never run again — is the only
-source of rollback, and a settled rollback is the only license to fork: at
-the section's begin for a retry, at 0 for a restart. Forks are the only
-events that mint revisions. The journal stays the guest's narrative
-throughout: `sys.abort` appears on it only when the guest called it, and a
-host abandonment (failure, stop, restart) is **management state** stamped
-durably on the process — its only journal trace the compensation section it
-appends, its conclusion the fork itself. The stamp standing past a terminal
-conclusion is what licenses the retry of a zero-registration scope to fork:
-that rollback leaves no journal trace at all.
-
-### 19. Reservation / TCC as a pattern
-
-> **Status:** not available — the pattern below needs `sys.compensate`, which
-> was removed. The text below is the design record.
-
-Sagas have no isolation (García-Molina & Salem '87; Richardson's
-countermeasures: semantic lock, pending state). The resolution: Try-Confirm/
-Cancel needs **no processor feature and no driver** — it is a usage pattern of
-the primitives §10 already guarantees, because the pending state belongs to
-the *participant*, not the orchestrator. In Pardon & Pautasso's RESTful TCC
-the hold is a resource on the service that owns it; the coordinator only
-remembers what to confirm or cancel — which is exactly what the journal and
-`sys.compensate` already are. Aurora writes to third-party systems that every
-reader treats as the source of truth: a reservation is only real if it is
-written *there*. An orchestrator-side hold table (a `core.hold` driver
-shipped briefly, then removed) is a reservation no other booker can see, and
-an orchestrator-imposed TTL is the resource owner's policy usurped.
-
-The pattern, inside a section:
-
-	sys.begin
-	hold  := dispatch("airline.reserve", args)          — a real write, visible to all readers
-	         compensate({"airline.release", hold.id})   — the guaranteed undo (runs on abort, failure, or stop)
-	…        payment, second leg, anything that may fail …
-	         dispatch("airline.confirm", hold.id)       — the last call before commit
-	sys.commit
-
-No `confirm(&call)`-at-commit primitive either, by the same razor:
-`compensate` earns its existence because abort/failure is a path the guest is
-not alive to handle; commit is a path where the guest is alive and in
-control, so a well-placed dispatch already does it. If the participant
-self-expires holds, the guest handles the expired errno like any other
-failure — their resource, their clock.
-
-### 25. Attempt-scoped idempotency keys across rollback boundaries
-
-Crash re-drive (same attempt: the key must be stable) and rollback retry (a
-new transaction: the key must be fresh) are different beasts, and a key of
-bare `(header, position, call-hash)` dressed them the same: a retry that
-reproduced byte-identical args at the same position would *adopt* the
-rolled-back attempt's recorded effect — an effect its rollback had already
-compensated. Resolved within the existing abstractions: the revision **is**
-the attempt identity. Each record carries the revision that first wrote it
-(stamped by the Journal at append), and intent identity derives from the
-record — `(header, revision, position, call-hash)`. A re-driven open intent
-sits in the fork's shared prefix with its origin revision intact, so it
-recomputes its original key however many resume forks intervene; a
-rolled-back section's retry re-executes live under the new revision and gets
-a fresh key space. Uniform for children — their journals scope their own
-keys. Proven by the crash matrices and the recharge test.
+| 0 | Ambient-surface lockdown | done (`ambient.go`, `ErrAmbientAuthority`) |
+| 1 | Program versioning for replay | done as a digest binding: a process never runs under a changed program. The journal header was removed. |
+| 2 | Laws as tests | partial: laws 1 and 2 have unit tests. The runtime tests cover the rest |
+| 3 | Hash-chained journal | removed. `journaled.Verify` checks structure only |
+| 4 | Capability attenuation helper | removed, as was the dist's capability ceiling |
+| 5 | `spawn` (child processes) | removed. See ARCHITECTURE, *Parked designs* |
+| 6 | ABI version, errnos, savepoint syscalls | done (`sys.ABIVersion`, `sys.Errno`, `sys.begin`/`sys.commit`) |
+| 9 | Intent/completion records | done. Idempotency keys for drivers were removed |
+| 10 | Compensation and abort-retry | abort-retry done (the section runs again). Compensation removed |
+| 11 | Information-flow labels and provenance | done (labels, flow policy, `sys.declassify`) |
+| 12 | Resource management | done (`MaxMemoryPages`, `ResumeTimeout`). Quotas and the `Throttle` limiter removed |
+| 13 | Reference-monitor validation | done (`monitor.Validator`) |
+| 14 | Deterministic simulation tests | done (aurora-capcompute `sim/`) |
+| 15 | Scheduler with priority and admission | removed. The scheduler is a worker pool (`internal/agent/pool.go`) |
+| 16 | Snapshots, compaction, retention | removed. Parked |
+| 17 | Journal → OpenTelemetry exporter | removed. Returns with #29 |
+| 18 | Exactly-once effects | removed. Effects are at least once in the crash window |
+| 19 | Reservation (TCC) pattern | removed with compensation |
+| 20 | Approval-composable compensation | removed with compensation |
+| 21 | Rollback matrix | removed with compensation. Abort and re-run tests remain |
+| 22 | Journaled time and randomness | done (`sys.now`, `sys.random`) |
+| 24 | Plan/execute program (CaMeL) | removed (the `camel` program) |
+| 25 | Attempt-scoped idempotency keys | removed with the keys. Records still carry their revision |

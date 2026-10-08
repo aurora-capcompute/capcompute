@@ -1,70 +1,59 @@
-## What this is
+# Architecture
 
-This document describes the OS model of the Aurora core: **capcompute** (the
-processor — it runs wasm programs deterministically behind one
-syscall gate) and the layers **aurora-capcompute** builds on it (`monitor/`,
-`replay/`, `journaled/` — the reference monitor, replay, and journal; moved
-there by the 2026-07-19 charter passes: the processor library is
-primitives-only). Together they form a **library operating system** —
-OS abstractions provided as Go libraries linked into a host application, not
-a standalone kernel on hardware. The system is:
+This document describes the OS model of the Aurora core. It has two parts:
 
-> **A note on "kernel".** The component is the **processor** — that is what
-> capcompute is, what the code calls it, and the word to use when naming the
-> thing that compiles programs, spawns processes, and serves syscalls. "Kernel"
-> is kept only for the *role* it plays in the OS model above, and for real
-> kernels this document compares against (seL4, KeyKOS, gVisor, microkernels).
-> It names no package, type, or file in this repo. If a sentence would still be
-> true with "capcompute" substituted in, the word you want is *processor*.
+- **capcompute**, the processor. It runs Wasm programs deterministically behind
+  one syscall gate.
+- **aurora-capcompute**, the runtime on top. Its `monitor/`, `replay/` and
+  `journaled/` packages are the reference monitor, replay and the journal.
 
-- **capability-based** — guests have *zero ambient authority*; they can only invoke
-  explicitly granted capabilities (lineage: seL4, KeyKOS);
-- **cooperatively scheduled** — guests run to `yield`/completion; there is no
-  preemption (lineage: classic cooperative multitasking);
-- **orthogonally persistent** — no filesystem; process state is reconstructed by
-  replaying a journal of host calls (lineage: single-level store — AS/400, KeyKOS,
-  EROS);
-- **durably replayable** — the journal doubles as crash-recovery *and* audit trail
-  (lineage: durable execution — Temporal; VM replay — ReVirt).
+Together they are a **library operating system**: OS abstractions as Go
+libraries that a host application links in. The model has four properties:
 
-## Glossary (code name → OS concept → contract)
+- **Capability-based.** A guest has no ambient authority. It can only call
+  capabilities that its grant names (lineage: seL4, KeyKOS).
+- **Cooperatively scheduled.** A guest runs until it yields or completes. There
+  is no preemption.
+- **Orthogonally persistent.** A process has no filesystem. The runtime rebuilds
+  its state by replaying a journal of its syscalls (lineage: AS/400, KeyKOS).
+- **Durably replayable.** The journal is both the crash-recovery log and the
+  audit trail (lineage: Temporal, ReVirt).
 
-The left column is the code (the OS vocabulary is now the API, as of the
-rename pass); the middle is the OS concept it *is*; the right is the promise
-the name makes. A name adopts an OS term **only where the thing honors that
-concept's contract** — never introduce a false friend (no `Thread`: there is
-no preemption; no `Interrupt`: yields are cooperative).
+The word "kernel" names only this role in the model. The component is the
+**processor**. No package, type or file uses the name "kernel".
+
+## Glossary
+
+A name takes an OS term only when it keeps that term's contract. So there is no
+`Thread` (no preemption) and no `Interrupt` (yields are cooperative).
 
 | Code | OS concept | Contract |
 |---|---|---|
-| wasm module | **Program image** | on-disk code; many processes may run one program |
-| `Program` / `NewProgram` | **Loaded program** | one compiled image, a factory of processes; wires the syscall entry |
-| `NewProcess` | **posix_spawn** | instantiate a process: explicit input, credential, dispatcher, quantum deadline — nothing inherited |
-| `Process` | **Process** | one running instance; states idle/active/terminated ≈ ready/running/terminated |
-| `PID` interface / `.PID()` | **PID** | stable, deterministic process identity (same type/method-name pattern as Go's `error`) |
-| `Resume` / `ProcessSpec` / `ResumeResult` / `ResumeHandle` | **Schedule a quantum** | give a process CPU until it yields/completes/stops/fails (cooperative) |
-| `sys.Syscall{Name,Args}` | **Syscall** (request) | the guest→host request crossing the trap boundary |
-| `sys.SyscallResult{result\|yield\|failed}` | **Syscall result** | the value/effect returned to the guest |
-| `sys.Authorization` | **Grant / approval context** | forward-propagated authority for a replayed action |
-| `Process.Cred` / `Dispatch(ctx, cred, …)` | **Credential** | host-side identity + authority context for the process; never guest-visible or guest-supplied |
-| `sys.Dispatcher` | **Syscall dispatcher / driver interface** | turns a `Syscall` into a `SyscallResult` — and nothing else; what a syscall *means* is the runtime's, not the kernel's |
-| concrete dispatchers (`aurora-dispatchers`) | **Drivers** (outbound) | mediate a process's I/O to external devices |
-| chat sources (Telegram/Slack) | **Drivers** (inbound) + **controlling terminal** | see *Drivers: the symmetry* |
-| `journaled.Record` (aurora-capcompute) | **Journal** (WAL, intent logging) | append-only envelope+payload records = durability + audit (one structure, two jobs) |
-| `Validator` / `Flow`+`Taints` (aurora-capcompute `monitor`) | **Reference monitor** | complete mediation: grant set, arg schemas, information flow — every access checked, none journaled (denials re-derive on replay) |
-| `Wrap` (aurora-capcompute `monitor`) | **The canonical chain** | encodes which layers sit above vs below the replay boundary — the load-bearing order, in code not prose |
-| `pool` (aurora-capcompute `internal/agent`) | **Scheduler** | a fixed worker pool: first-come-first-served, bounded concurrency, a wall-clock deadline per quantum — scheduling is runtime policy, so it lives above the processor |
-| `core.scratch` (aurora-dispatchers) | **Session working directory** | get/put/list/search on the calling session's durable store — shared by the session's processes, private to the session, provenance-labelled (a home for a large read offloaded out of the model's context, and for data one process leaves for the next) |
+| Wasm module | Program image | Code. Many processes can run one program. |
+| `Program`, `NewProgram` | Loaded program | One compiled image. It creates processes. |
+| `NewProcess` | `posix_spawn` | Input, credential, dispatcher and quantum deadline are explicit. The process inherits nothing. |
+| `Process` | Process | One running instance. |
+| `Resume`, `ResumeHandle`, `ResumeResult` | Schedule a quantum | The process runs until it yields, completes, stops or fails. |
+| `sys.Syscall` | Syscall request | The guest-to-host request. |
+| `sys.SyscallResult` | Syscall result | `result`, `yield` or `failed`. |
+| `sys.Authorization` | Approval context | The authority that a human decision gave to one call. |
+| `Process.Cred` | Credential | Host-side identity. The guest never sees or supplies it. |
+| `sys.Dispatcher` | Driver interface | Turns a `Syscall` into a `SyscallResult`. What a syscall means is the runtime's concern. |
+| aurora-dispatchers drivers | Drivers (outbound) | Do a process's I/O with the outside world. |
+| Chat connectors (Slack) | Drivers (inbound), controlling terminal | Start and drive processes from outside. |
+| `journaled.Record` | Journal (write-ahead log) | Append-only intent and completion records. |
+| `Validator`, `Flow`, `Taints` (`monitor`) | Reference monitor | Checks every call against the grant set, the argument schema and the flow policy. |
+| `monitor.Wrap` | The canonical chain | Puts each layer on its side of the replay boundary, in code. |
+| `pool` (`internal/agent`) | Scheduler | A fixed worker pool, first come first served, with a deadline per quantum. |
+| `core.scratch` | Session working directory | A durable key-value store that the processes of one session share. |
 
-> Package note: the syscall vocabulary lives in package `sys`, not `syscall`
-> (which would shadow Go's stdlib).
+The syscall vocabulary is in package `sys`, because `syscall` would shadow the
+Go standard library.
 
 ## The syscall ABI
 
-The guest↔host boundary is a single Extism host function, namespace
-`extism:host/compute`, function `syscall`. The guest emits a `Syscall`; the
-host dispatches the `Syscall` through the driver chain of the process that
-`Resume` planted in the call context, and returns a `SyscallResult`.
+The guest-host boundary is one Extism host function: namespace
+`extism:host/compute`, function `syscall`.
 
 ```
 Syscall:   {"abi":4, "name":"mail.send", "args":{…}}
@@ -72,297 +61,158 @@ Response:  {"status":"result"|"yield"|"failed", "code":"<errno>",
             "result":{…}, "message":"…", "labels":[…]}
 ```
 
-Since v4 the envelope is JSON — it *is* the wire form of `sys.Syscall` and
-`sys.SyscallResult`, produced by the struct tags those types already carry.
-There is no wire package and nothing is translated at the boundary: the host
-unmarshals a `sys.Syscall`, hands that exact value to the dispatcher chain,
-and marshals the `sys.SyscallResult` that comes back. The envelope stays one
-uniform shape — what generic interposition needs — with `args`/`result`
-nesting inside it as opaque payloads. Journal records use the same encoding,
-so the audit path is simply the wire read back.
+The envelope is the JSON form of `sys.Syscall` and `sys.SyscallResult`. The
+host decodes a `sys.Syscall`, gives that value to the dispatcher chain, and
+encodes the result. The journal uses the same encoding. `args` and `result`
+are opaque payloads inside the envelope. ABI v3 used protobuf. v4 removed it,
+because typed payloads (not a typed envelope) would have given its benefits,
+at the cost of code generation inside every guest.
 
-v3 was a protobuf envelope with a hand-rolled, reflection-free codec on each
-side of the boundary. It was withdrawn in v4: the benefits that motivated it
-(protovalidate/CEL, per-field sensitivity annotations) need typed *payloads*
-rather than a typed envelope, and typing payloads would have put real codegen
-back inside guests — the cost the hand-rolling existed to avoid. What it
-charged in the meantime was a second codec per language for the same six
-fields these types already encode.
+The host refuses a different ABI version with errno `bad_abi`. A failure
+carries an errno from a closed set, so a guest does not parse messages. The
+guest returns `{"status":"completed"}` or `{"status":"yielded"}` from its
+entrypoint. Treat this ABI like POSIX: keep it small and version every change.
 
-The envelope is versioned (`sys.ABIVersion`); the host rejects mismatches with
-errno `bad_abi`. Failures carry a machine-readable errno alongside the human
-message so guests branch on a closed set instead of parsing prose. Two names
-are reserved for **redo scopes** — `sys.begin` / `sys.commit`
-(`sys.SyscallBegin`/`sys.SyscallCommit`), journaled as side-effect-free
-markers with stack semantics; failed-process resume forks the journal past the
-outermost unclosed bracket. Call them what they are: a redo scope can only
-*re-execute* its contents, never undo them — bracketing non-idempotent,
-un-keyed effects amplifies at-least-once execution.
-There is no undo layer. `sys.abort` abandons the open scope: the runtime forks
-the journal at its `sys.begin` and re-runs the scope live, bounded by an
-abort-retry budget; with no scope open the process fails. A scope that must be
-re-runnable is the program's own contract. (A guest-authored undo layer,
-`sys.compensate`, was built and then removed — no host served it.)
+**Redo scopes.** `sys.begin` and `sys.commit` bracket a section. They are
+journaled markers with no side effect. A section can only be run again, never
+undone. So a section around effects that are not idempotent can repeat those
+effects. `sys.abort` abandons the open section: the runtime forks the journal at
+its `sys.begin` and runs the section again, at most 10 times. With no open
+section, `sys.abort` fails the process. There is no undo layer.
 
-Guest programs return `{"status":"completed",...}` or `{"status":"yielded"}` from
-their entrypoint. **This ABI is your POSIX: version it, keep it small, and treat
-changes as breaking.** It is the contract every driver and every LLM-generated
-component builds against.
+**The triad.** Every dispatch carries three values:
 
-Host-side, every dispatch carries the **syscall triad**: `cred` (*who* — the
-host-side credential for the process; the guest never sees or supplies it),
-`syscall` (*what* is being asked), and `auth` (*what has been granted* for this
-specific call — the resolved approval context). Driver stratification follows
-from the triad: **leaf drivers that only perform work ignore `cred`; only
-policy decorators (validation, approval, quotas) consume it.** A leaf driver
-reading `cred` to make an authority decision is a layering smell — that
-decision belongs in a decorator in front of it.
+- `cred`: who asks (host-side, never visible to the guest).
+- `syscall`: what is asked.
+- `auth`: what a human approved for this call.
 
-## The five invariants (laws)
+Leaf drivers do work and ignore `cred`. Only policy layers (validation,
+approval, flow) read it. A leaf driver that makes an authority decision from
+`cred` is in the wrong layer.
 
-These must always hold. Encode them as tests/CI checks; they are what make the
-governance and durability claims *provable* rather than aspirational.
+## The five laws
 
-1. **No ambient authority.** A process can do nothing except call granted
-   capabilities. (This is the crown jewel — the moment a guest is given ambient
-   WASI/host access "for convenience," enforcement degrades to advisory.)
-   *Enforced in code:* `NewProgram` rejects images with `allowed_hosts`/
-   `allowed_paths` (`ErrAmbientAuthority`); guest module config is
-   processor-constructed, never caller-supplied (`ambient.go`).
-2. **Determinism.** Guests are deterministic; *all* non-determinism (clock,
-   randomness, I/O) flows through syscalls. No wall-clock or RNG inside a guest.
-   *Enforced in code:* the WASI clock and RNG a guest can reach are pinned to
-   deterministic sources that restart identically per instance (`ambient.go`),
-   so a crash-replay observes the original sequence.
-3. **Journal write-ahead.** Two laws, one per direction of the boundary:
-   **journal-before-execute** — an *intent* record is appended before a
-   syscall's driver runs, so nothing changes the world without a trace; a
-   crash between execute and commit leaves a detectable *open intent*.
-   **Journal-before-observe** —
-   the *completion* record is appended before the result becomes observable
-   to the guest, so replay is exact. (`yield` is never committed — it is a
-   re-triable, blocking syscall whose intent stays open while the external
-   task is pending.)
-   *Enforced in code:* the intent/completion tape
-   (the runtime's `journaled` package); an open intent met on replay is retried
-   (at-least-once — drivers get no idempotency key); `journaled.Verify` checks
-   the record structure.
-   The journal is not tamper-evident: the hash chain was removed.
-4. **Un-bypassable reference monitor.** An approval-required capability cannot
-   execute without a resolved `Authorization`, and the monitor validates
-   *every* access — **complete mediation**: a syscall is checked against the
-   cred's grant set (ungranted name → `denied`) and its args against the
-   capability's declared `InputSchema` (malformed → `invalid_args`) before any
-   driver sees it.
-   The monitor also tracks **information flow** (the CaMeL architecture as
-   a processor primitive): each granted operation declares the source classes its
-   results carry (`labels`, e.g. `untrusted_web`) and the classes that may not
-   flow into it (`taints`) — per-operation policy declared on the operation's
-   entry in the grant table, which resolves the operation from the call args;
-   because the guest is opaque, flow is judged
-   conservatively — every label a process observes taints everything it later
-   emits. Declassification is the reserved `sys.declassify` syscall: every
-   crossing names its labels and a reason, requires a human approval (there
-   is no unapproved path — an unattended declassify would just be flow-policy
-   bypass), and is journaled, so replay re-applies the crossing without
-   asking again.
-   *Enforced in code:* the runtime's `monitor` package — the `Validator`
-   decorator at the front of the dispatcher chain, plus the provenance set —
-   `Flow.Stamp` and `Declassifier` below the replay layer (so labels and
-   approved crossings are journaled) and `Flow.Guard` above it (so a
-   crash-restarted host rebuilds taint exactly from replayed results, and
-   replayed declassifications lift labels in order). The monitor also hands
-   the process's taint downstream (`capability.WithTaint`) so drivers that
-   store guest-derived data persist its provenance. Chain order: `Validator` →
-   `Flow.Guard` → replay → `Flow.Stamp` → `Declassifier` →
-   drivers — encoded in `monitor.Wrap`, so assembling a chain with a layer on the wrong side of the
-   replay boundary is a construction you cannot express, not a rule you must
-   remember. Reserved
-   markers (`sys.begin`/`sys.commit`) are exempt because they are processor
-   control syscalls, not capabilities; `sys.declassify` is *not* exempt — it
-   must be granted like any capability.
-5. **Minimal TCB.** The processor owns lifecycle, syscall dispatch, and enforcement —
-   nothing else. Guard the boundary; helpers do not belong in the processor.
+1. **No ambient authority.** A process can only call granted capabilities.
+   *Code:* `NewProgram` refuses images with `allowed_hosts` or `allowed_paths`
+   (`ErrAmbientAuthority`). The processor builds the guest module config. The
+   caller cannot supply it (`ambient.go`).
+2. **Determinism.** All non-determinism (clock, randomness, I/O) goes through
+   syscalls. *Code:* the WASI clock and random source are deterministic and
+   restart the same way for each instance (`ambient.go`). Real time and
+   entropy are the journaled `sys.now` and `sys.random`.
+3. **Journal write-ahead.**
+   - *Journal before execute:* an intent record is appended before the driver
+     runs. A crash after the effect leaves an open intent.
+   - *Journal before observe:* the completion record is appended before the
+     guest sees the result, so replay is exact.
 
-## Drivers: the symmetry
+   A yield is never committed. Its intent stays open while the task is pending.
+   *Code:* the intent/completion tape (`journaled`). Replay runs an open intent
+   again, so effects are at least once in the crash window. Drivers get no
+   idempotency key. `journaled.Verify` checks the record structure. The journal
+   is not tamper-evident.
+4. **Complete mediation.** The monitor checks every call before a driver sees
+   it:
+   - A name outside the grant set gets `denied`.
+   - Arguments that fail the operation's schema get `invalid_args`.
+   - A capability that requires approval does not run without an approved
+     `Authorization`.
+   - **Information flow:** each operation declares the source labels its
+     results carry (`labels`, for example `untrusted_web`) and the labels that
+     must not flow into it (`taints`). The guest is opaque, so every label a
+     process observes taints everything it does after.
+   - **Declassification** is the `sys.declassify` syscall. It names the labels
+     and a reason, needs a human approval every time, and is journaled, so
+     replay applies it again without a new question. It must be granted like
+     any capability.
 
-Drivers are the one category that mediates between processes and the outside world.
-They come in two directions, and recognizing them as *the same category pointed
-opposite ways* keeps the architecture coherent:
+   *Code:* the chain for one process, outermost first:
 
-- **Outbound drivers = dispatchers.** Called *by* a process as an outbound syscall
-  (`process → device`): internet reads, file reads, host commands, `sys.timer`. The
-  process initiates; the driver mediates access to a machine device.
-- **Inbound drivers = sources.** Drive processes *from outside* (`human → processor →
-  process`): Telegram, Slack. The device on the other end is a **human**. A source
-  fuses three classic roles — `getty` (accepts a "login" = a user starting a
-  conversation), the **tty** (streams messages in/out), and the process's
-  **controlling terminal**.
+   ```
+   Validator → Flow.Guard → replay → Flow.Stamp          (monitor.Wrap)
+     → savepoints → world → lifecycle → task → Declassifier → progress → timer → drivers
+   ```
 
-Consequences of the symmetry, used as design rules:
+   Layers above replay (validation, flow denials) are derived again on every
+   pass and never journaled. Layers below replay are journaled once. The task
+   layer turns a yield from beneath it into a durable approval task.
+   `monitor.Wrap` builds the top of the chain, so a layer on the wrong side of
+   the replay boundary cannot be expressed. The monitor also passes the
+   process's taint down (`capability.WithTaint`), so a driver that stores data
+   keeps its labels.
+5. **Minimal TCB.** The processor owns lifecycle, syscall dispatch and
+   isolation. Nothing else goes in it.
 
-- A new integration is a **driver**; decide its direction (does a process call it,
-  or does it drive processes?) and it slots into the existing model.
-- **Human approval is terminal I/O.** `require_approval` is a process writing a
-  prompt to its controlling terminal and performing a *blocking read* for the
-  reply. It composes with the yield/resume model: the read is a `yield` until the
-  human answers.
-- **Commands are job control.** `/cancel` = Ctrl-C (SIGINT to the foreground
-  process = `Stop`), `/status` = job status, `/retry` = resume, `/new` = new
-  session. A conversation *is* a session; its channel is the controlling terminal.
-- Unlike a classic byte-stream tty, sources are **durable and multiplexed**: the
-  inbox is persisted before the poll offset advances (idempotent input across
-  crashes), sessions survive restart. Model it as a persistent terminal server
-  (getty + tmux that survives reboot), consistent with orthogonal persistence.
+## Drivers
 
-## Processes and `spawn` (not served)
+Drivers connect processes to the outside world, in two directions:
 
-Agents creating agents is not supported today. A `sys.spawn` syscall was built
-to the design below, served by the runtime, and then removed with child
-processes; the name is no longer reserved. The design stays here for the day a
-consumer needs it. Design decisions, with prior art:
+- **Outbound drivers** are dispatchers. A process calls them: `core.internet`,
+  `core.httpTemplate`, `core.command`, `core.openaiApi`, `core.scratch`,
+  `sys.timer`.
+- **Inbound drivers** are connectors. They drive processes from outside: the
+  Slack connector, `aurora-cli`. A connector is the process's controlling
+  terminal. Human approval is terminal I/O: the process yields, and the human's
+  answer resumes it.
 
-- **`spawn`, not `fork`.** Use `posix_spawn`/`CreateProcess` semantics:
-  `spawn(program, input, capabilities) → child_pid`. A *fresh* process running a
-  named program with *explicitly handed* capabilities. Do **not** clone parent
-  state (POSIX `fork` is a known design mistake to copy — see *"A fork() in the
-  road"*, HotOS '19; and cloning would mean cloning the journal).
-- **Capability delegation with attenuation.** The child's capabilities must be a
-  subset of what the parent holds (KeyKOS/seL4). The parent cannot grant authority
-  it lacks. The `spawn` call is journaled, so the whole process tree's authority
-  graph is auditable for free.
-- **Deterministic child PID.** Derive it — `child_pid = f(parent_pid, spawn_seq,
-  program)` with a per-parent monotonic `spawn_seq`. Never random (invariant #2).
-- **Synchronous first.** v1: parent `spawn`s, yields until the child completes,
-  reads the child's result from *its own* journal on replay (child is not re-run).
-  This is the "child workflow" pattern. Defer async/concurrent spawn — it requires
-  journaling every inter-process message as an ordered input event (actor model +
-  event sourcing), a real determinism cost to pay only when concurrency is needed.
-- **Two host-side contracts, not just the guest ABI:** (a) *scheduler hand-off* —
-  `spawn`'s host handler enqueues the new `Process` into the wrapping runtime's
-  queue (scheduling lives in userland, by design); (b) *supervision* — decide
-  cascade-kill vs orphan-adopt on parent `Stop`. Study Erlang/OTP supervision trees
-  before this grows.
+### Host commands (`core.command`)
 
-## Scheduling: above the processor
+The manifest author owns the whole command line. The guest only fills declared
+slots. Aurora enforces:
 
-Scheduling is runtime policy, not a processor primitive: the processor's whole
-contribution is `Resume` (one cooperative quantum). The scheduler lives in
-aurora-capcompute (`internal/agent/pool.go`), where its only consumer is: a
-fixed pool of workers, first-come-first-served, with a wall-clock deadline per
-quantum and no residency — every quantum starts a fresh instance. A fair-share
-scheduler, an OTP-style supervisor, and a delay-only `Throttle` rate limiter
-were built and removed unconsumed; their designs live in git and `ROADMAP.md`.
+- an absolute executable, with no `PATH` lookup and no shell.
+- slot values from a closed set or an anchored pattern, never starting with
+  `-`, never with control characters.
+- an absolute working directory, stated in the manifest.
+- an environment that the manifest declares, with nothing inherited.
+- approval (on by default), with the resolved command line in the prompt.
+- the flow policy of the command's entry.
 
-## Persistence and replay
+Aurora does **not** confine what the binary does after it starts. The binary
+runs with the server's operating-system rights. The author vouches for every
+allowed command and slot value. Some binaries read meaning into a value with
+no dash (`curl -d @file` uploads a local file). Confinement comes from the
+deployment (a dedicated user, a container, egress rules) and from
+least-privilege credentials in the command's environment. The ROADMAP parks a
+per-command OS sandbox.
 
-A process's *own* state has no filesystem: a process is durable because the
-runtime journals every syscall outcome; after a crash the runtime recreates the
-process from its persisted program + input and **replays the journal** to the
-exact interruption point. The same append-only journal is the **audit trail** —
-every input, effect, capability grant, and approval decision, in order.
-Durability and audit are one mechanism, by design (the write-ahead-log pattern:
-one log, crash-recovery + history).
+## Scheduling
 
-## Shared state: the filesystem role
+Scheduling is runtime policy. The processor gives only `Resume`, one quantum.
+The scheduler is `internal/agent/pool.go` in aurora-capcompute: a fixed worker
+pool, first come first served, with a wall-clock deadline per quantum. Every
+quantum starts a fresh instance.
 
-A session is an *execution* scope, not a *data* scope. Data that outlives and
-crosses processes/sessions does **not** belong in the journal (which is per-process) and is
-**not** shared by widening session scope — that is not what operating systems do.
-Unix keeps cross-session durable data in a *separate* abstraction, the
-**filesystem**, reached from any session through mediated (permissioned) access:
-your login session dies, `$HOME` persists, and tomorrow's shell reads the history
-yesterday's wrote. That is literally cross-session agent memory.
+## Persistence, replay and program versions
 
-The scope hierarchy (`tenant → session → process → revision`) says where shared data
-lives by *level*:
+A process is durable because the runtime journals every syscall outcome. After
+a crash, the runtime creates the process again from its program and input, and
+replays the journal to the point of interruption. The same journal is the
+audit trail.
 
-- **process** — process memory; the journal; reconstructed by replay.
-- **session** — conversation state (dialogue context, process sequence).
-- **tenant** — the `$HOME` role: cross-session memory (preferences, learned
-  facts, standing context). **This is the shared-data home**; without it,
-  "data shared between sessions" has no principled place.
+Replay requires the same program. A program change that adds, removes,
+reorders or changes syscalls makes the journal diverge. So a process is bound
+to the digest of its program (wasm and both schemas) for life. A process whose
+program changed cannot resume. The runtime refuses it with a conflict. To
+change a program, drain or stop its processes, then restart with the new
+program. New processes run the new program. Journal migration and snapshots
+are not built.
 
-**Status:** no tenant store ships today, and the runtime has no tenant level:
-one deployment serves one tenant. `core.memory` was built to the design below
-and then removed. `core.scratch` is the only store, and it is
-per-session: it follows the same two laws, one level down.
+## Parked designs
 
-Two laws dictate the *form* a tenant store must take — it is not a
-special case, it is a driver:
+- **Child processes (`spawn`).** Built, then removed with no consumer. If they
+  return, use `spawn`, not `fork`: a fresh process with explicit capabilities.
+  The child's grants are a subset of the parent's. The child id is
+  deterministic. The parent waits for the child's result, and replay reads it
+  from the child's journal.
+- **Cross-session memory.** Today `core.scratch` is per session. A store that
+  outlives sessions must be a journaled capability (determinism: replay reads
+  the recorded value) with explicit grants (no ambient authority). Values keep
+  the writer's labels, so a planted instruction comes back as untrusted.
+  Concurrent writers from different sessions will need compare-and-set.
 
-1. **Determinism (law #2)** forbids ambient reads of shared mutable state (a
-   concurrent mutation from another session would diverge replay). So the store
-   sits **behind a journaled syscall** (a `get`/`put` capability, or
-   file-flavoured `fs.*`): the *read result* is committed to the journal, and
-   replay re-reads the recorded value regardless of the store's current
-   contents. This is identical to how the ultimate shared mutable store — the
-   internet — is already handled behind `core.internet`. Cross-session memory is
-   *a shared mutable device behind a driver*.
-2. **No ambient authority (law #1)** makes it a **capability**: tenant-scoped,
-   attenuated per manifest to explicit mounts (an agent sees only the process,
-   session, and named shared spaces its grant opens — the mount list does
-   directory permissions for free), and governable (`require_approval` may gate
-   writes to standing memory). Cross-*tenant* sharing is forbidden by
-   construction — multi-tenant isolation outranks the metaphor (no Unix
-   world-readable equivalent).
+## Non-goals
 
-Security payoff: **memory poisoning** (planting an instruction that the agent
-"remembers" and later treats as trusted) becomes visible and policeable — a
-write from a process whose inputs were `untrusted_web`-tainted stores that label
-with the value (M4 provenance), so a later read surfaces it as untrusted content
-rather than laundered truth. Most agent stacks bolt memory on as an ambient RAG
-lookup outside all governance; here it would be a journaled, labelled,
-attenuated syscall.
-
-Concurrency: like a filesystem shared across sessions, concurrent writers need
-coordination; compare-and-set on the `put` operation is the design.
-
-## Coherence under growth: versioned replay
-
-This is the **known hard problem** for any journal-replay system, capcompute
-included. Name it now, because it is the fault line where the clean model meets
-software evolution.
-
-**The problem.** A process is reconstructed by replaying its journal against its
-program. But programs change. When *program v2* meets a journal written by *program
-v1*, replay must still produce a consistent process — and that is not free:
-
-- Invariant #2 (determinism) means the replayed syscall sequence must match what
-  the new code produces. Adding/removing pure logic (e.g. log lines) is safe;
-  changing the *number, order, or arguments* of syscalls diverges from the journal
-  and replay fails.
-- This is unsolved in the general case. Golem — further along than us — only
-  guarantees compatible changes and is still actively working state migration and
-  hot-update recovery (see golemcloud/golem issue #534). Temporal exposes the same
-  constraint as "non-deterministic workflow changes" and pushes users to versioned
-  branching. **There is no free lunch here; there is only a chosen discipline.**
-
-**What we owe the design (decide before it bites):**
-
-1. **Pin the program to the process.** Every process records the digest of the
-   program that wrote its journal, and the runtime never runs it under another
-   (pinned replay, below). The processor refuses any syscall from another ABI.
-2. **Define the compatibility contract.** State plainly which changes are
-   replay-safe (pure logic, added tail capabilities) and which are breaking
-   (reordering/removing/retyping syscalls). This is the guest-author's law, the
-   same way the ABI is the driver-author's law.
-3. **Provide an escape hatch for breaking changes.** Options, cheapest first:
-   - *drain* — finish all in-flight processes on v1 before deploying v2 (simplest;
-     often enough for short-lived processes);
-   - *pinned replay* — replay each process against the exact version that wrote its
-     journal, and only run *new* processes on the new version (Golem's default
-     posture);
-   - *migration* — a guest-provided function that transforms v1 journal/state into
-     v2 (most powerful, most complex; defer until required).
-4. **Snapshot to bound replay cost.** As journals grow, replay-from-zero gets
-   expensive. A periodic committed snapshot (checkpoint) of process state caps
-   replay to "since last snapshot" — the classic single-level-store move, and it
-   also gives migration a clean seam.
-
-## Non-goals (resist gold-plating)
-
-The metaphor is a map, not a checklist. Implement an OS concept only when a real
-requirement forces it. Not planned unless needed: preemptive scheduling, virtual
-memory/paging, a POSIX filesystem, signals beyond cancel, and async multi-process
-IPC. A uniprocessing, cooperatively-scheduled OS is still an OS.
+Build an OS concept only when a real requirement needs it. Not planned:
+preemptive scheduling, virtual memory, a POSIX filesystem, signals other than
+cancel, and asynchronous IPC between processes.

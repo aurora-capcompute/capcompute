@@ -1,33 +1,25 @@
 # Scope
 
-The processor primitives the library set out to provide are in place:
-`NewProgram` compiles an image, `NewProcess` instantiates a process and its
-dispatcher chain from a `ProcessSpec`, and `Resume` runs one cooperative
-quantum — the syscall host function dispatches through the process Resume
-planted in the call context (see `host.go` and the package doc in `doc.go`).
-Reconstructing a yielded process after a restart is therefore `NewProcess` under
-the application's control — the library deliberately exposes no `Replay(pid)`
-entry point, because *when* a process resumes and *what* is injected back are
-the wrapping system's decisions.
+The processor is complete for its job:
 
-This library deliberately does not own, and will not grow:
+- `NewProgram` compiles an image.
+- `NewProcess` creates a process from a `ProcessSpec`.
+- `Resume` runs one quantum. The host function dispatches through the closure
+  that `Resume` binds (see `host.go` and `doc.go`).
 
-- concrete durable store implementations;
-- replay, journals, or async completion;
-- reference-monitor policy (grants, schemas, flow labels);
-- dispatching syscalls to other guests;
-- schedulers, engines, or product-specific workflow code.
+The library has no `Replay(pid)` call. The wrapping system decides when a
+process resumes, and what it gets back.
 
-Those belong to the systems built on top of `capcompute` — the monitor,
-replay, and journal layers live in aurora-capcompute (`monitor/`, `replay/`,
-`journaled/`) since the 2026-07-19 charter passes. capcompute is the
-processor: it runs programs deterministically and hands every syscall to the
-`sys.Dispatcher` the process was created with; what that dispatcher enforces
-is the layer above's business.
+This library does not own, and will not grow:
 
-The rule is visible in the tree: every `.go` file here is either consumed
-processor API or a `_test.go` file. Built-ahead code with no consumer gets
-removed — the IPC razor — with its design kept in docs until a consumer
-forces it back.
+- durable stores.
+- replay, journals or async completion.
+- reference-monitor policy (grants, schemas, flow labels).
+- dispatch to other guests.
+- schedulers or product workflow code.
 
-For scored next steps, see `docs/ROADMAP.md`.
+aurora-capcompute owns those (`monitor/`, `replay/`, `journaled/`,
+`internal/agent/`). Every `.go` file here is processor API that something uses,
+or a test. Code with no consumer is removed.
+
+Next steps: `docs/ROADMAP.md`.
