@@ -214,7 +214,7 @@ one of three statuses:
 - `result` — the syscall completed and returned a value;
 - `yield` — the host needs outside work before the guest can continue;
 - `failed` — carrying a machine‑readable errno (`denied`, `expired`, `not_found`,
-  `invalid_args`, `transient`, `conflict`, `internal`, `bad_abi`) plus a message.
+  `invalid_args`, `transient`, `internal`, `bad_abi`) plus a message.
 
 The guest decides what to do with the response and returns from its exported
 function with `{"status":"completed"}` or `{"status":"yielded"}`. Some syscall
