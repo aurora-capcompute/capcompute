@@ -15,23 +15,10 @@ It is the processor of a small operating system:
 
 ## Where it fits
 
-`capcompute` is the bottom layer of the Aurora repos:
+`capcompute` is the bottom layer of the Aurora repos. The
+[aurora-dist README](https://github.com/aurora-capcompute/aurora-dist) shows how
+they fit together. Above this repo:
 
-```
-   aurora-cli / aurora-slack-connector      clients
-              │  HTTP /v1
-         aurora-dist                         the server binary
-              │
-   ┌──────────┴──────────┐
- aurora-capcompute    aurora-dispatchers     runtime + capability drivers
-   └──────────┬──────────┘
-         capcompute                          the processor (this repo)
-
-   aurora-brains                             the Wasm programs that run inside
-```
-
-- **capcompute**: isolation, the one syscall gate, deterministic execution,
-  resource caps.
 - **[aurora-capcompute](https://github.com/aurora-capcompute/aurora-capcompute)**:
   the runtime. It owns the reference monitor (grants, flow policy), replay, the
   journal, sessions, retries and approvals.
@@ -39,8 +26,6 @@ It is the processor of a small operating system:
   the drivers that make HTTP calls, run allowlisted commands and call an LLM.
 - **[aurora-brains](https://github.com/aurora-capcompute/aurora-brains)**: the
   agent programs.
-- **[aurora-dist](https://github.com/aurora-capcompute/aurora-dist)**: one server
-  that assembles all of the above.
 
 ## What it gives you
 

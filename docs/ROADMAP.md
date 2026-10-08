@@ -1,8 +1,7 @@
 # Roadmap
 
-The OS model exists (the ledger at the end lists it, and `ARCHITECTURE.md`
-describes the model and its laws). The current goal is production in the narrowest posture:
-**one tenant, and one channel, the `/v1` HTTP API, as the trust boundary**. One
+`ARCHITECTURE.md` describes the model and its laws. The current goal is
+production in the narrowest posture: **one tenant, and one channel, the `/v1` HTTP API, as the trust boundary**. One
 organization, one runtime instance, one SQLite file. Multi-tenancy, more
 channels and scale-out are parked until a single tenant runs in production.
 
@@ -78,8 +77,8 @@ server restarts. Secrets come from the environment, and rotation is a restart.
   Returns when a second tenant is real.
 - **Per-command OS sandbox** for `core.command`: bubblewrap or Landlock on
   Linux, `sandbox-exec` on macOS, with read, write and network policy per
-  command, and fail closed. Today the author vouches for each command, and the deployment
-  confines the server. Returns when one of these is real:
+  command, and fail closed. Today the author vouches for each command, and the
+  deployment confines the server. Returns when one of these is real:
   - a command runs code that the model wrote, or takes code or file paths as a
     slot (run such code as a Wasm guest instead, if possible).
   - more than one tenant shares a server.
@@ -92,34 +91,12 @@ server restarts. Secrets come from the environment, and rotation is a restart.
 - **Snapshots** to bound replay cost. Returns when replay cost is measured as a
   problem.
 - **Journal retention and archival.** Returns when #28's gauge requires it.
+- **Child processes (`spawn`).** Built, then removed with no consumer. If they
+  return: `spawn`, not `fork` (a fresh process with explicit capabilities), the
+  child's grants a subset of the parent's, a deterministic child id, and replay
+  reads the child's result from the child's journal.
+- **Cross-session memory.** Today `core.scratch` is per session. A store that
+  outlives sessions must be a journaled capability with explicit grants, and
+  its values keep the writer's labels. Writers from different sessions will
+  need compare-and-set.
 - **Async spawn, pooled stores, scale-out placement.** No current customer.
-
-## Ledger: the OS model
-
-Git history keeps the design of every removed item.
-
-| # | Item | Status |
-|---|------|--------|
-| 0 | Ambient-surface lockdown | done (`ambient.go`, `ErrAmbientAuthority`) |
-| 1 | Program versioning for replay | done as a digest binding: a process never runs under a changed program. The journal header was removed. |
-| 2 | Laws as tests | partial: laws 1 and 2 have unit tests. The runtime tests cover the rest |
-| 3 | Hash-chained journal | removed. `journaled.Verify` checks structure only |
-| 4 | Capability attenuation helper | removed, as was the dist's capability ceiling |
-| 5 | `spawn` (child processes) | removed. See ARCHITECTURE, *Parked designs* |
-| 6 | ABI version, errnos, savepoint syscalls | done (`sys.ABIVersion`, `sys.Errno`, `sys.begin`/`sys.commit`) |
-| 9 | Intent/completion records | done. Idempotency keys for drivers were removed |
-| 10 | Compensation and abort-retry | abort-retry done (the section runs again). Compensation removed |
-| 11 | Information-flow labels and provenance | done (labels, flow policy, `sys.declassify`) |
-| 12 | Resource management | done (`MaxMemoryPages`, `ResumeTimeout`). Quotas and the `Throttle` limiter removed |
-| 13 | Reference-monitor validation | done (`monitor.Validator`) |
-| 14 | Deterministic simulation tests | done (aurora-capcompute `sim/`) |
-| 15 | Scheduler with priority and admission | removed. The scheduler is a worker pool (`internal/agent/pool.go`) |
-| 16 | Snapshots, compaction, retention | removed. Parked |
-| 17 | Journal → OpenTelemetry exporter | removed. Returns with #29 |
-| 18 | Exactly-once effects | removed. Effects are at least once in the crash window |
-| 19 | Reservation (TCC) pattern | removed with compensation |
-| 20 | Approval-composable compensation | removed with compensation |
-| 21 | Rollback matrix | removed with compensation. Abort and re-run tests remain |
-| 22 | Journaled time and randomness | done (`sys.now`, `sys.random`) |
-| 24 | Plan/execute program (CaMeL) | removed (the `camel` program) |
-| 25 | Attempt-scoped idempotency keys | removed with the keys. Records still carry their revision |

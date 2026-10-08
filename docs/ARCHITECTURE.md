@@ -126,20 +126,13 @@ approval, flow) read it. A leaf driver that makes an authority decision from
      replay applies it again without a new question. It must be granted like
      any capability.
 
-   *Code:* the chain for one process, outermost first:
-
-   ```
-   Validator → Flow.Guard → replay → Flow.Stamp          (monitor.Wrap)
-     → savepoints → world → lifecycle → task → Declassifier → progress → timer → drivers
-   ```
-
-   Layers above replay (validation, flow denials) are derived again on every
-   pass and never journaled. Layers below replay are journaled once. The task
-   layer turns a yield from beneath it into a durable approval task.
-   `monitor.Wrap` builds the top of the chain, so a layer on the wrong side of
-   the replay boundary cannot be expressed. The monitor also passes the
-   process's taint down (`capability.WithTaint`), so a driver that stores data
-   keeps its labels.
+   *Code:* the runtime's `monitor` package. `monitor.Wrap` puts validation and
+   flow denials above the replay boundary (decided again on every pass, never
+   journaled) and stamped labels below it (journaled once), so a layer on the
+   wrong side cannot be expressed. The monitor also passes the process's taint
+   down (`capability.WithTaint`), so a driver that stores data keeps its
+   labels. The full chain is in aurora-capcompute's `docs/WALKTHROUGH.md` and
+   `internal/agent/dispatcher.go`.
 5. **Minimal TCB.** The processor owns lifecycle, syscall dispatch and
    isolation. Nothing else goes in it.
 
@@ -155,26 +148,9 @@ Drivers connect processes to the outside world, in two directions:
   terminal. Human approval is terminal I/O: the process yields, and the human's
   answer resumes it.
 
-### Host commands (`core.command`)
-
-The manifest author owns the whole command line. The guest only fills declared
-slots. Aurora enforces:
-
-- an absolute executable, with no `PATH` lookup and no shell.
-- slot values from a closed set or an anchored pattern, never starting with
-  `-`, never with control characters.
-- an absolute working directory, stated in the manifest.
-- an environment that the manifest declares, with nothing inherited.
-- approval (on by default), with the resolved command line in the prompt.
-- the flow policy of the command's entry.
-
-Aurora does **not** confine what the binary does after it starts. The binary
-runs with the server's operating-system rights. The author vouches for every
-allowed command and slot value. Some binaries read meaning into a value with
-no dash (`curl -d @file` uploads a local file). Confinement comes from the
-deployment (a dedicated user, a container, egress rules) and from
-least-privilege credentials in the command's environment. The ROADMAP parks a
-per-command OS sandbox.
+`core.command` controls the command line, not what the binary does after it
+starts. The aurora-dispatchers README (*Host commands*) states the contract,
+and the aurora-dist README says how to confine the server.
 
 ## Scheduling
 
@@ -197,19 +173,6 @@ program changed cannot resume. The runtime refuses it with a conflict. To
 change a program, drain or stop its processes, then restart with the new
 program. New processes run the new program. Journal migration and snapshots
 are not built.
-
-## Parked designs
-
-- **Child processes (`spawn`).** Built, then removed with no consumer. If they
-  return, use `spawn`, not `fork`: a fresh process with explicit capabilities.
-  The child's grants are a subset of the parent's. The child id is
-  deterministic. The parent waits for the child's result, and replay reads it
-  from the child's journal.
-- **Cross-session memory.** Today `core.scratch` is per session. A store that
-  outlives sessions must be a journaled capability (determinism: replay reads
-  the recorded value) with explicit grants (no ambient authority). Values keep
-  the writer's labels, so a planted instruction comes back as untrusted.
-  Concurrent writers from different sessions will need compare-and-set.
 
 ## Non-goals
 
