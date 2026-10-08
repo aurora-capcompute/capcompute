@@ -46,9 +46,9 @@ when the gauge requires it.
 
 ### 29. Metrics, alerts, runbook
 
-The server exports no metrics today. Add the metrics that page: counts of finished processes
-by status and cause, abort-retry budget exhaustion, re-drive walls, pending task
-age, timer fire lag, DB size, LLM latency and errors. Alert on tasks near
+The server exports no metrics today. Add the metrics that page: counts of
+finished processes by status and cause, abort-retry budget exhaustion, re-drive
+walls, pending task age, timer fire lag, DB size, LLM latency and errors. Alert on tasks near
 expiry and on DB size. The runbook covers task resolution, retry and stop, and
 the program drain procedure that the digest binding requires. Lands across
 aurora-capcompute (counters) and aurora-dist (exposition).
