@@ -138,7 +138,7 @@ manifest files in aurora-dist.
 | 15 | Scheduler: priority, admission, virtual-actor activation | built, then **removed**; the runtime's scheduler is a first-come-first-served worker pool (`internal/agent/pool.go`); the supervisor was removed unconsumed |
 | 16 | Journal lifecycle: snapshot + compaction + retention | removed — built, then taken out as premature; see *Out of scope* |
 | 17 | Journal→OpenTelemetry exporter | built, then **removed** unconsumed; returns as dist ops (#29) |
-| 18 | Exactly-once effects: drivers honor idempotency keys | built, then **removed** — effects are at-least-once in the crash window; `NonIdempotentSyscalls` surfaces such a call for review instead |
+| 18 | Exactly-once effects: drivers honor idempotency keys | built, then **removed** — effects are at-least-once in the crash window |
 | 19 | Reservation / TCC as a pattern | **removed** with compensation — the pattern needs `sys.compensate` (see §19) |
 | 20 | Approval-composable compensation (yielding inverse) | built, then **removed** with compensation |
 | 21 | Deterministic rollback matrix | built, then **removed** with compensation; abort and guest-failure re-run tests remain |

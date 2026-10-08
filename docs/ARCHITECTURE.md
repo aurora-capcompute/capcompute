@@ -145,9 +145,8 @@ governance and durability claims *provable* rather than aspirational.
    task is pending.)
    *Enforced in code:* the intent/completion tape
    (the runtime's `journaled` package); an open intent met on replay is retried
-   (at-least-once — drivers get no idempotency key) or surfaced as
-   `IndeterminateError`, per `OpenIntentPolicy`; `journaled.Verify` checks the
-   record structure.
+   (at-least-once — drivers get no idempotency key); `journaled.Verify` checks
+   the record structure.
    The journal is not tamper-evident: the hash chain was removed.
 4. **Un-bypassable reference monitor.** An approval-required capability cannot
    execute without a resolved `Authorization`, and the monitor validates
