@@ -1,8 +1,7 @@
 # Roadmap
 
 The OS model is built and adversarially proven (see the ledger at the bottom;
-`ARCHITECTURE.md` for the model and its invariants, `RESEARCH.md` for the
-prior-art review). The current focus is getting it to production in the
+`ARCHITECTURE.md` for the model and its invariants). The current focus is getting it to production in the
 narrowest honest posture: **a single-tenant deployment with one communication
 channel — the `/v1` HTTP API — as the trust boundary**. One organization, one
 runtime instance, one SQLite file, one API surface. Multi-tenancy, additional
@@ -82,24 +81,23 @@ is single-writer, and the runtime folds the log into memory once, at boot, so
 one runtime owns one store. A second replica on the same store would not see
 the first one's sessions. Ship a systemd unit and a k8s manifest (stateful volume
 for the data dir, SIGTERM grace matching the runtime's Close timeout).
-Programs arrive by CI dropping built `.wasm` into the programs directory; the
-poller and the digest law do the rest. Secrets stay env-injected
+Programs arrive by CI dropping built `.wasm` into the programs directory and a
+restart; the digest law does the rest. Secrets stay env-injected
 (`AURORA_TASK_SECRET`, provider keys); rotation = restart. Docs plus two small
 manifest files in aurora-dist.
 
 ## Out of scope (parked, with return triggers)
 
 - **Multi-tenancy** — per-principal grants via attenuation tokens (macaroons,
-  Birgisson et al., NDSS '14; the D3 policy layer), per-tenant ceilings and
+  Birgisson et al., NDSS '14; a policy layer), per-tenant ceilings and
   quotas, a silo-per-tenant control plane, metering folded from the journal.
-  The runtime has no tenant level today (one deployment is one tenant); the
-  dist already refuses manifests past a capability ceiling. Returns
+  The runtime has no tenant level today (one deployment is one tenant). Returns
   when a second tenant is real, as identity → policy → silo control plane, in
   that order.
 - **MCP driver** — bridging stdio MCP servers as granted syscalls
   (`mcp.<server>.<tool>`). Dropped for now: it multiplies the external surface
   before the first deployment needs it, and its open-ended tool lists sit
-  awkwardly under the capability ceiling. Returns with the first real
+  awkwardly in a static grant set. Returns with the first real
   deployment that needs a tool only MCP provides, behind explicit per-server
   tool lists.
 - **Additional channels** (chat sources as inbound drivers, streaming APIs) —
@@ -126,7 +124,7 @@ manifest files in aurora-dist.
 | 1 | Journal program-versioning + replay compatibility check | **done** (`journaled.Header`, `ReplayIncompatibleError`) |
 | 2 | Law CI tests (the five invariants as tests) | partial — laws 1/2 unit-tested; the abort/savepoint and runtime tests cover the rest in practice |
 | 3 | Hash-chained journal (tamper-evident audit) | built, then **removed** (2026-08-15); `journaled.Verify` checks structure only |
-| 4 | Capability attenuation helper | built, then **removed**; the dist's capability ceiling is a plain allowlist |
+| 4 | Capability attenuation helper | built, then **removed**; so was the dist's capability ceiling |
 | 5 | `process.spawn` syscall (sync-first child processes) | built, then **removed** with child processes; the name is no longer reserved |
 | 6 | ABI version field, errnos, savepoint syscalls | **done** (`sys.ABIVersion`, `sys.Errno`, `sys.SyscallBegin/Commit`) |
 | 9 | Intent/completion journal records (journal-before-execute) | **done** (two-record tape); the idempotency keys handed to drivers were later **removed** |
@@ -157,8 +155,7 @@ Items 7 (snapshot/checkpoint), 8 (chat sources as drivers), and 23
 > re-runs it live; nothing is undone. The text below is the design record.
 
 `sys.begin`/`sys.commit` are **redo scopes**, not savepoints — they can only
-re-execute, never undo, and re-execution amplifies at-least-once (RESEARCH.md
-finding 9). The undo layer is guest-authored, in the log: `sys.compensate`
+re-execute, never undo, and re-execution amplifies at-least-once. The undo layer is guest-authored, in the log: `sys.compensate`
 registers an effect's inverse (a deferred syscall, journaled with concrete
 args), and `sys.abort{reason, retry_seconds}` rolls the open scope back —
 registered compensations execute newest-first (journaled, idempotency-keyed,

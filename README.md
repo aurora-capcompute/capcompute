@@ -241,7 +241,7 @@ host.go          the single Extism host function + syscall dispatch
 ambient.go       deterministic clock + RNG (so replay above is exact)
 sys/             the syscall vocabulary: Syscall, SyscallResult, Dispatcher, errno
                  — and, via their JSON tags, the ABI-v4 wire envelope itself
-docs/            ARCHITECTURE.md (the OS model), PITCH.md, ROADMAP.md, …
+docs/            ARCHITECTURE.md (the OS model), ROADMAP.md
 testdata/        the smallest Wasm guest fixtures used by integration tests
 ```
 

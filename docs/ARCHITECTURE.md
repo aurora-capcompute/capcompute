@@ -87,7 +87,7 @@ side of the boundary. It was withdrawn in v4: the benefits that motivated it
 rather than a typed envelope, and typing payloads would have put real codegen
 back inside guests — the cost the hand-rolling existed to avoid. What it
 charged in the meantime was a second codec per language for the same six
-fields these types already encode. See CHALLENGE.md finding E.
+fields these types already encode.
 
 The envelope is versioned (`sys.ABIVersion`); the host rejects mismatches with
 errno `bad_abi`. Failures carry a machine-readable errno alongside the human
@@ -97,7 +97,7 @@ are reserved for **redo scopes** — `sys.begin` / `sys.commit`
 markers with stack semantics; failed-process resume forks the journal past the
 outermost unclosed bracket. Call them what they are: a redo scope can only
 *re-execute* its contents, never undo them — bracketing non-idempotent,
-un-keyed effects amplifies at-least-once execution (RESEARCH.md finding 9).
+un-keyed effects amplifies at-least-once execution.
 There is no undo layer. `sys.abort` abandons the open scope: the runtime forks
 the journal at its `sys.begin` and re-runs the scope live, bounded by an
 abort-retry budget; with no scope open the process fails. A scope that must be
