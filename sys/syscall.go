@@ -3,7 +3,8 @@ package sys
 import (
 	"bytes"
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 )
 
 // ABIVersion is the syscall wire version this processor speaks. Guests declare
@@ -92,12 +93,6 @@ func Fail(message string) SyscallResult {
 
 // FailCode returns a failure classified by errno.
 func FailCode(errno Errno, message string) SyscallResult {
-	if message == "" {
-		message = "command failed"
-	}
-	if errno == "" {
-		errno = ErrnoInternal
-	}
 	return SyscallResult{status: StatusFailed, errno: errno, message: message}
 }
 
@@ -140,11 +135,7 @@ func (r SyscallResult) WithLabels(labels ...string) SyscallResult {
 			merged[label] = struct{}{}
 		}
 	}
-	r.labels = make([]string, 0, len(merged))
-	for label := range merged {
-		r.labels = append(r.labels, label)
-	}
-	sort.Strings(r.labels)
+	r.labels = slices.Sorted(maps.Keys(merged))
 	return r
 }
 

@@ -5,15 +5,6 @@ import (
 	"testing"
 )
 
-type testPID struct {
-	id    string
-	value string
-}
-
-func (k testPID) PID() string {
-	return k.id
-}
-
 func TestResumeStatusReadsYieldedOutput(t *testing.T) {
 	got, err := resumeStatus([]byte(`{"status":"yielded"}`))
 	if err != nil {

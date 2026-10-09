@@ -127,11 +127,10 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 	pid := advPID{id: "adv-" + mode}
 	input, _ := json.Marshal(map[string]string{"mode": mode})
 	process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[advPID]{
-		Input:         input,
-		Entrypoint:    "run",
-		Cred:          pid,
-		Dispatcher:    dispatcher,
-		ResumeTimeout: s.timeout,
+		Input:      input,
+		Entrypoint: "run",
+		Cred:       pid,
+		Dispatcher: dispatcher,
 	})
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
@@ -142,12 +141,18 @@ func runAdversary(t *testing.T, mode string, s advSetup) (capcompute.ResumeResul
 		}
 	})
 
-	handle, err := capcompute.Resume(ctx, process)
+	runCtx := ctx
+	if s.timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, s.timeout)
+		defer cancel()
+	}
+	results, err := capcompute.Resume(runCtx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	select {
-	case result := <-handle.Results:
+	case result := <-results:
 		if result.Status != capcompute.ResumeCompleted {
 			return result, nil
 		}
@@ -268,11 +273,11 @@ func TestAdversaryDispatchErrorDoesNotCrashHost(t *testing.T) {
 			t.Fatalf("spawn %s: %v", mode, err)
 		}
 		t.Cleanup(func() { _ = proc.Close(context.Background()) })
-		handle, err := capcompute.Resume(ctx, proc)
+		results, err := capcompute.Resume(ctx, proc)
 		if err != nil {
 			t.Fatalf("resume %s: %v", mode, err)
 		}
-		return <-handle.Results
+		return <-results
 	}
 
 	// The guest forces a dispatcher error; the quantum traps.

@@ -93,11 +93,11 @@ func TestGuestResumeStates(t *testing.T) {
 				}
 			})
 
-			handle, err := capcompute.Resume(ctx, process)
+			results, err := capcompute.Resume(ctx, process)
 			if err != nil {
 				t.Fatalf("resume: %v", err)
 			}
-			result := <-handle.Results
+			result := <-results
 			if result.Status != tt.want {
 				t.Fatalf("status = %s, want %s; err = %v; output = %s", result.Status, tt.want, result.Err, result.Output)
 			}
@@ -152,11 +152,11 @@ func TestGuestNeverObservesInfrastructureErrors(t *testing.T) {
 		}
 	})
 
-	handle, err := capcompute.Resume(ctx, process)
+	results, err := capcompute.Resume(ctx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	result := <-handle.Results
+	result := <-results
 	if result.Status != capcompute.ResumeFailed {
 		t.Fatalf("status = %s (output %s), want failed — the guest observed an unjournaled outcome", result.Status, result.Output)
 	}
@@ -213,10 +213,10 @@ func TestGuestCanBeStopped(t *testing.T) {
 		}
 	})
 
-	// The resume's context is the only way to stop it: ResumeHandle carries the
+	// The resume's context is the only way to stop it: Resume returns the
 	// outcome, not a canceller.
 	runCtx, stop := context.WithCancel(ctx)
-	handle, err := capcompute.Resume(runCtx, process)
+	results, err := capcompute.Resume(runCtx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -227,7 +227,6 @@ func TestGuestCanBeStopped(t *testing.T) {
 	stop()
 	stop()
 
-	results := handle.Results
 	select {
 	case result := <-results:
 		if result.Status != capcompute.ResumeStopped {
@@ -324,11 +323,11 @@ func TestGuestAmbientReadsAreDeterministic(t *testing.T) {
 				t.Errorf("close process: %v", err)
 			}
 		})
-		handle, err := capcompute.Resume(ctx, process)
+		results, err := capcompute.Resume(ctx, process)
 		if err != nil {
 			t.Fatalf("resume: %v", err)
 		}
-		result := <-handle.Results
+		result := <-results
 		if result.Status != capcompute.ResumeCompleted {
 			t.Fatalf("status = %s; err = %v; output = %s", result.Status, result.Err, result.Output)
 		}
@@ -383,11 +382,11 @@ func TestGuestAmbientHTTPIsDenied(t *testing.T) {
 			t.Errorf("close process: %v", err)
 		}
 	})
-	handle, err := capcompute.Resume(ctx, process)
+	results, err := capcompute.Resume(ctx, process)
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	result := <-handle.Results
+	result := <-results
 	if result.Status != capcompute.ResumeFailed {
 		t.Fatalf("ambient http produced status %s (output %s); want failed", result.Status, result.Output)
 	}
@@ -427,11 +426,10 @@ func TestGuestResourceLimits(t *testing.T) {
 			t.Fatalf("encode input: %v", err)
 		}
 		process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[integrationPID]{
-			Input:         input,
-			Entrypoint:    "run",
-			Cred:          pid,
-			Dispatcher:    integrationDispatcher{},
-			ResumeTimeout: timeout,
+			Input:      input,
+			Entrypoint: "run",
+			Cred:       pid,
+			Dispatcher: integrationDispatcher{},
 		})
 		if err != nil {
 			t.Fatalf("create process: %v", err)
@@ -441,12 +439,18 @@ func TestGuestResourceLimits(t *testing.T) {
 				t.Errorf("close process: %v", err)
 			}
 		})
-		handle, err := capcompute.Resume(ctx, process)
+		runCtx := ctx
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			runCtx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
+		results, err := capcompute.Resume(runCtx, process)
 		if err != nil {
 			t.Fatalf("resume: %v", err)
 		}
 		select {
-		case result := <-handle.Results:
+		case result := <-results:
 			return result
 		case <-time.After(30 * time.Second):
 			t.Fatal("resume did not return")

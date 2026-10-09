@@ -33,7 +33,7 @@ they fit together. Above this repo:
 | --- | --- |
 | **No ambient authority.** The syscall is the only way out: no filesystem, no network, no environment. | Code that an LLM wrote reaches only what the dispatcher serves. |
 | **Deterministic execution.** The processor owns the WASI clock and random source. A fresh instance sees the same sequence. | The layer above can rebuild a process by replaying its journal. |
-| **Resource caps.** A memory cap per program (`Config.MaxMemoryPages`) and a deadline per quantum (`ProcessSpec.ResumeTimeout`). | A guest cannot exhaust the host or loop forever. |
+| **Resource caps.** A memory cap per program (`Config.MaxMemoryPages`), and the deadline of the context a quantum runs under. | A guest cannot exhaust the host or loop forever. |
 | **Yield and resume.** A syscall can yield for outside work, such as an approval or a timer. | A process can wait without holding a thread. |
 
 The journal, replay, savepoints, grants and flow control are built on this
@@ -80,9 +80,9 @@ process, err := capcompute.NewProcess(ctx, program, capcompute.ProcessSpec[Run]{
 })
 defer process.Close(ctx)
 
-// 3. Run one quantum and read its single result.
-handle, _ := capcompute.Resume(ctx, process)
-result := <-handle.Results()
+// 3. Run one quantum and read its single result. Ending ctx stops it.
+results, _ := capcompute.Resume(ctx, process)
+result := <-results
 switch result.Status {
 case capcompute.ResumeCompleted: // the guest finished
 case capcompute.ResumeYielded:   // the guest waits for outside work

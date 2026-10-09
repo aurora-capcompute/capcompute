@@ -38,9 +38,6 @@ type ambientSources struct {
 // diverge from the journal (law #2). Resetting makes a warm resume
 // observe exactly the sequence a cold replay on a fresh instance would.
 func (a *ambientSources) reset() {
-	if a == nil {
-		return
-	}
 	a.clock.wallReads = 0
 	a.clock.nanoReads = 0
 	a.rand.state = randSeed

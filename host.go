@@ -41,18 +41,17 @@ func dispatchSyscall(
 	plugin *extism.CurrentPlugin,
 	offset uint64,
 ) uint64 {
-	dispatch, ok := ctx.Value(syscallContextKey{}).(syscallFunc)
-	if !ok || dispatch == nil {
-		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInternal, "process missing from context"))
-	}
+	// Resume planted the process's dispatch; the host function runs only
+	// inside a Resume.
+	dispatch := ctx.Value(syscallContextKey{}).(syscallFunc)
 	rawSyscall, err := plugin.ReadBytes(offset)
 	if err != nil {
-		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInvalidArgs, fmt.Errorf("read raw syscall: %w", err).Error()))
+		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInvalidArgs, "read raw syscall: "+err.Error()))
 	}
 
 	var syscall sys.Syscall
 	if err := json.Unmarshal(rawSyscall, &syscall); err != nil {
-		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInvalidArgs, fmt.Errorf("decode syscall: %w", err).Error()))
+		return returnToGuest(plugin, sys.FailCode(sys.ErrnoInvalidArgs, "decode syscall: "+err.Error()))
 	}
 	if syscall.Abi != sys.ABIVersion {
 		return returnToGuest(plugin, sys.FailCode(sys.ErrnoBadABI,

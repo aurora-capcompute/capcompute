@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
-	"time"
 
 	extism "github.com/extism/go-sdk"
 	"github.com/tetratelabs/wazero"
@@ -18,7 +17,6 @@ var (
 	ErrImageMemoryOverride = errors.New("image overrides the program-owned memory cap")
 	ErrInvalidGuestOutput  = errors.New("invalid guest output")
 	ErrProcessActive       = errors.New("process is already active")
-	ErrProcessRequired     = errors.New("process is required")
 	ErrProcessTerminated   = errors.New("process is terminated")
 )
 
@@ -44,95 +42,6 @@ type Config struct {
 // the image is just code, so the credential lives on the Process.
 type Program struct {
 	compiled *extism.CompiledPlugin
-}
-
-// Process owns the reusable Extism plugin instance for one spawned program.
-// Process state is not thread-safe; callers coordinate concurrent use.
-//
-// Cred is the host-side credential for the process: it identifies the process
-// and carries whatever authority context the app attaches. It is never
-// visible to or supplied by the guest.
-type Process[K any] struct {
-	Cred       K
-	Input      json.RawMessage
-	Entrypoint string
-	plugin     *extism.Plugin
-	dispatcher sys.Dispatcher[K]
-	ambient    *ambientSources
-	timeout    time.Duration
-	state      processState
-}
-
-type processStatus uint8
-
-const (
-	processIdle processStatus = iota
-	processActive
-	processTerminated
-)
-
-type processState struct {
-	mu     sync.Mutex
-	status processStatus
-}
-
-func (s *processState) start() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	switch s.status {
-	case processIdle:
-		s.status = processActive
-		return nil
-	case processActive:
-		return ErrProcessActive
-	case processTerminated:
-		return ErrProcessTerminated
-	default:
-		panic("invalid process status")
-	}
-}
-
-func (s *processState) finish(stopped bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.status != processActive {
-		panic("cannot finish inactive process")
-	}
-	if stopped {
-		s.status = processTerminated
-		return
-	}
-	s.status = processIdle
-}
-
-func (s *processState) terminate() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	switch s.status {
-	case processIdle:
-		s.status = processTerminated
-		return nil
-	case processActive:
-		return ErrProcessActive
-	case processTerminated:
-		return nil
-	default:
-		panic("invalid process status")
-	}
-}
-
-// Close releases the Extism plugin instance owned by this process.
-func (process *Process[K]) Close(ctx context.Context) error {
-	if process == nil {
-		return ErrProcessRequired
-	}
-	if err := process.state.terminate(); err != nil {
-		return err
-	}
-	return process.plugin.Close(ctx)
 }
 
 // NewProgram compiles a program image and registers the syscall host
@@ -180,41 +89,25 @@ func (p *Program) Close(ctx context.Context) error {
 }
 
 // ProcessSpec describes one process: its program input, entrypoint,
-// credential, the dispatcher that will serve its syscalls, and its quantum
-// deadline.
+// credential, and the dispatcher that will serve its syscalls.
+//
+// Cred is the host-side credential for the process: it identifies the process
+// and carries whatever authority context the app attaches. It is never
+// visible to or supplied by the guest.
 type ProcessSpec[K any] struct {
 	Input      json.RawMessage
 	Entrypoint string
 	Cred       K
 	Dispatcher sys.Dispatcher[K]
-
-	// ResumeTimeout bounds the wall-clock time of one Resume quantum
-	// (0 = unbounded). A guest still running at the deadline is stopped and
-	// the resume reports ResumeStopped with context.DeadlineExceeded.
-	ResumeTimeout time.Duration
 }
 
-// ResumeStatus is the result of one guest invocation attempt.
-type ResumeStatus string
-
-const (
-	ResumeCompleted ResumeStatus = "completed"
-	ResumeYielded   ResumeStatus = "yielded"
-	ResumeStopped   ResumeStatus = "stopped"
-	ResumeFailed    ResumeStatus = "failed"
-)
-
-// ResumeResult is delivered when the resume goroutine exits.
-type ResumeResult struct {
-	Status ResumeStatus
-	Output json.RawMessage
-	Exit   uint32
-	Err    error
-}
-
-// ResumeHandle controls one active guest invocation.
-type ResumeHandle struct {
-	Results chan ResumeResult
+// Process owns the reusable Extism plugin instance for one spawned program.
+// Its quanta are serialized: a second Resume while one runs is refused.
+type Process[K any] struct {
+	spec    ProcessSpec[K]
+	plugin  *extism.Plugin
+	ambient *ambientSources
+	state   processState
 }
 
 // NewProcess instantiates a fresh process from the program image —
@@ -228,24 +121,90 @@ func NewProcess[K any](ctx context.Context, program *Program, spec ProcessSpec[K
 	if err != nil {
 		return nil, err
 	}
-	return &Process[K]{
-		Cred:       spec.Cred,
-		Input:      spec.Input,
-		Entrypoint: spec.Entrypoint,
-		plugin:     plugin,
-		dispatcher: spec.Dispatcher,
-		ambient:    ambient,
-		timeout:    spec.ResumeTimeout,
-	}, nil
+	return &Process[K]{spec: spec, plugin: plugin, ambient: ambient}, nil
 }
 
-// Resume gives a process the CPU in its own goroutine and returns its control
-// handle. The process runs until it completes, yields, fails, or is stopped —
-// cooperative scheduling, no preemption.
-func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, error) {
-	if process == nil {
-		return nil, ErrProcessRequired
+// Close releases the Extism plugin instance owned by this process.
+func (process *Process[K]) Close(ctx context.Context) error {
+	if err := process.state.terminate(); err != nil {
+		return err
 	}
+	return process.plugin.Close(ctx)
+}
+
+type processStatus uint8
+
+const (
+	processIdle processStatus = iota
+	processActive
+	processTerminated
+)
+
+// processState is a process's lifecycle: idle between quanta, active during
+// one, terminated once stopped or closed.
+type processState struct {
+	mu     sync.Mutex
+	status processStatus
+}
+
+func (s *processState) start() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch s.status {
+	case processActive:
+		return ErrProcessActive
+	case processTerminated:
+		return ErrProcessTerminated
+	}
+	s.status = processActive
+	return nil
+}
+
+// finish ends the active quantum. A stopped quantum terminates the process.
+func (s *processState) finish(stopped bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if stopped {
+		s.status = processTerminated
+	} else {
+		s.status = processIdle
+	}
+}
+
+func (s *processState) terminate() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status == processActive {
+		return ErrProcessActive
+	}
+	s.status = processTerminated
+	return nil
+}
+
+// ResumeStatus is the result of one guest invocation attempt.
+type ResumeStatus string
+
+const (
+	ResumeCompleted ResumeStatus = "completed"
+	ResumeYielded   ResumeStatus = "yielded"
+	ResumeStopped   ResumeStatus = "stopped"
+	ResumeFailed    ResumeStatus = "failed"
+)
+
+// ResumeResult is how one quantum ended. Output is the guest's own output; Err
+// says why a quantum failed or was stopped.
+type ResumeResult struct {
+	Status ResumeStatus
+	Output json.RawMessage
+	Err    error
+}
+
+// Resume gives a process the CPU in its own goroutine and returns the channel
+// its outcome arrives on. The process runs until it completes, yields, fails,
+// or is stopped — cooperative scheduling, no preemption. ctx is the only way to
+// stop it: a guest still running when ctx ends is stopped, and a stopped
+// process is terminated.
+func Resume[K any](ctx context.Context, process *Process[K]) (<-chan ResumeResult, error) {
 	if err := process.state.start(); err != nil {
 		return nil, err
 	}
@@ -256,65 +215,33 @@ func Resume[K any](ctx context.Context, process *Process[K]) (*ResumeHandle, err
 	// safe to do before launching the run.
 	process.ambient.reset()
 
-	handle := &ResumeHandle{
-		Results: make(chan ResumeResult, 1),
-	}
+	results := make(chan ResumeResult, 1)
 	go func() {
-		defer close(handle.Results)
-
-		// The process's own wall-clock bound, on top of whatever the caller's
-		// context already carries: a guest that never yields is stopped either
-		// way, and the context is the only way to stop one.
-		callCtx := ctx
-		if process.timeout > 0 {
-			var cancel context.CancelFunc
-			callCtx, cancel = context.WithTimeout(ctx, process.timeout)
-			defer cancel()
-		}
-
+		defer close(results)
+		spec := process.spec
 		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
-			return process.dispatcher.Dispatch(ctx, process.Cred, syscall, sys.Authorization{})
+			return spec.Dispatcher.Dispatch(ctx, spec.Cred, syscall, sys.Authorization{})
 		})
-		pluginCtx := context.WithValue(callCtx, syscallContextKey{}, dispatch)
-		exit, output, err := process.plugin.CallWithContext(pluginCtx, process.Entrypoint, process.Input)
+		_, output, err := process.plugin.CallWithContext(
+			context.WithValue(ctx, syscallContextKey{}, dispatch), spec.Entrypoint, spec.Input)
 
-		stopped := callCtx.Err() != nil
+		stopped := ctx.Err() != nil
 		process.state.finish(stopped)
-		if stopped {
-			handle.Results <- ResumeResult{Status: ResumeStopped, Exit: exit, Err: callCtx.Err()}
-			return
-		}
-		if err != nil {
-			handle.Results <- ResumeResult{Status: ResumeFailed, Exit: exit, Err: err}
-			return
-		}
-		status, statusErr := resumeStatus(output)
-		if statusErr != nil {
-			handle.Results <- ResumeResult{
-				Status: ResumeFailed,
-				Output: append(json.RawMessage(nil), output...),
-				Exit:   exit,
-				Err:    statusErr,
-			}
-			return
-		}
-		if status == ResumeYielded {
-			handle.Results <- ResumeResult{
-				Status: ResumeYielded,
-				Output: append(json.RawMessage(nil), output...),
-				Exit:   exit,
-			}
-			return
-		}
-		handle.Results <- ResumeResult{
-			Status: ResumeCompleted,
-			Output: append(json.RawMessage(nil), output...),
-			Exit:   exit,
+		switch {
+		case stopped:
+			results <- ResumeResult{Status: ResumeStopped, Err: ctx.Err()}
+		case err != nil:
+			results <- ResumeResult{Status: ResumeFailed, Err: err}
+		default:
+			status, err := resumeStatus(output)
+			results <- ResumeResult{Status: status, Output: append(json.RawMessage(nil), output...), Err: err}
 		}
 	}()
-	return handle, nil
+	return results, nil
 }
 
+// resumeStatus reads the status a guest reports in its output: completed or
+// yielded. Anything else is a failure.
 func resumeStatus(output []byte) (ResumeStatus, error) {
 	var envelope struct {
 		Status ResumeStatus `json:"status"`
@@ -323,14 +250,8 @@ func resumeStatus(output []byte) (ResumeStatus, error) {
 		return ResumeFailed, errors.Join(ErrInvalidGuestOutput, err)
 	}
 	switch envelope.Status {
-	case ResumeCompleted:
-		return ResumeCompleted, nil
-	case ResumeYielded:
-		return ResumeYielded, nil
-	default:
-		return ResumeFailed, errors.Join(
-			ErrInvalidGuestOutput,
-			errors.New("status must be completed or yielded"),
-		)
+	case ResumeCompleted, ResumeYielded:
+		return envelope.Status, nil
 	}
+	return ResumeFailed, errors.Join(ErrInvalidGuestOutput, errors.New("status must be completed or yielded"))
 }

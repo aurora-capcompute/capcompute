@@ -33,7 +33,7 @@ A name takes an OS term only when it keeps that term's contract. So there is no
 | `Program`, `NewProgram` | Loaded program | One compiled image. It creates processes. |
 | `NewProcess` | `posix_spawn` | Input, credential, dispatcher and quantum deadline are explicit. The process inherits nothing. |
 | `Process` | Process | One running instance. |
-| `Resume`, `ResumeHandle`, `ResumeResult` | Schedule a quantum | The process runs until it yields, completes, stops or fails. |
+| `Resume`, `ResumeResult` | Schedule a quantum | The process runs until it yields, completes, stops or fails. |
 | `sys.Syscall` | Syscall request | The guest-to-host request. |
 | `sys.SyscallResult` | Syscall result | `result`, `yield` or `failed`. |
 | `sys.Authorization` | Approval context | The authority that a human decision gave to one call. |
