@@ -36,13 +36,12 @@ func hostFunction() extism.HostFunction {
 	return host
 }
 
-func dispatchSyscall(
-	ctx context.Context,
-	plugin *extism.CurrentPlugin,
-	offset uint64,
-) uint64 {
-	// Resume planted the process's dispatch; the host function runs only
-	// inside a Resume.
+// dispatchSyscall serves one guest syscall: it reads the envelope from guest
+// memory, checks the ABI version, dispatches, and writes the result back. A
+// malformed envelope is a failed result the guest can react to.
+func dispatchSyscall(ctx context.Context, plugin *extism.CurrentPlugin, offset uint64) uint64 {
+	// Resume planted the process's dispatch. The host function runs only inside
+	// a Resume.
 	dispatch := ctx.Value(syscallContextKey{}).(syscallFunc)
 	rawSyscall, err := plugin.ReadBytes(offset)
 	if err != nil {
@@ -60,20 +59,18 @@ func dispatchSyscall(
 
 	result, err := dispatch(ctx, syscall)
 	if err != nil {
-		// An infrastructure error is not an outcome: nothing was journaled, so
-		// the guest must not observe it (journal-before-observe covers the
-		// indeterminate case too). Trap the quantum — the panic surfaces as a
-		// failed resume, the intent stays open in the journal, and the re-drive
-		// resolves it by the open-intent policy. A handler-level
-		// failure (a failed SyscallResult) still flows to the guest as a
-		// recoverable observation; only the machinery's own errors trap.
+		// An error (as opposed to a failed result) is the machinery failing, not
+		// an outcome: nothing was journaled, so the guest must not observe it.
+		// Trap the quantum. The panic surfaces as a failed resume, the intent
+		// stays open in the journal, and the next run drives it again. A failed
+		// result still reaches the guest as a recoverable observation.
 		panic(fmt.Errorf("dispatch %s: %w", syscall.Name, err))
 	}
 	return returnToGuest(plugin, result)
 }
 
-// guestResult is the kernel's guest-facing rendering of a syscall outcome, and
-// it is a distinct type from the durable one on purpose.
+// guestResult is the processor's guest-facing rendering of a syscall outcome,
+// and it is a distinct type from the durable one on purpose.
 //
 // A SyscallResult also carries provenance labels: the runtime's flow monitor
 // stamps them and the journal records them, so a crash-restarted host can
@@ -92,6 +89,7 @@ type guestResult struct {
 	Message string            `json:"message,omitempty"`
 }
 
+// returnToGuest writes a result into guest memory and returns its offset.
 func returnToGuest(plugin *extism.CurrentPlugin, result sys.SyscallResult) uint64 {
 	encoded, err := json.Marshal(guestResult{
 		Status:  result.Status(),

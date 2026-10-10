@@ -8,30 +8,35 @@ import (
 )
 
 // ABIVersion is the syscall wire version this processor speaks. Guests declare
-// it on every Syscall; the host rejects mismatches with ErrnoBadABI. Since
-// v4 the wire encoding is JSON — a Syscall in, a SyscallResult out — so the
-// JSON tags on these types are the wire, the journal, and the audit
-// rendering at once. v3's protobuf envelope was removed: it required a second
-// hand-rolled codec per language for the same six fields these types already
-// encode, and the typed-args benefits that justified it were never reachable
-// while args stayed opaque payloads.
+// it on every Syscall, and the host refuses a mismatch with ErrnoBadABI. The
+// wire encoding is JSON — a Syscall in, a SyscallResult out — so the JSON tags
+// on these types are the wire, the journal, and the audit rendering at once.
 const ABIVersion = 4
 
-// Reserved syscall names. Savepoint brackets are journaled as side-effect-free
-// markers by the host: on a failed-process resume, the journal is forked just past
-// the outermost unclosed Begin so the whole declared unit re-executes.
-// Brackets follow stack semantics: a Commit closes the most recent open Begin.
+// Reserved syscall names: the runtime serves these itself, for every program.
 const (
-	SyscallBegin      = "sys.begin"
-	SyscallCommit     = "sys.commit"
-	SyscallInput      = "sys.input"
-	SyscallOutput     = "sys.output"
-	SyscallLog        = "sys.log"
-	SyscallAbort      = "sys.abort"
-	SyscallTimer      = "sys.timer"
+	// SyscallBegin and SyscallCommit bracket a section that is safe to run
+	// again. They have no effect. Brackets nest: a commit closes the most recent
+	// open begin. When a run fails inside a section, the next run forks the
+	// journal just past the outermost open begin, so the whole section runs
+	// again.
+	SyscallBegin  = "sys.begin"
+	SyscallCommit = "sys.commit"
+	// SyscallInput fetches the process's input and SyscallOutput records its
+	// answer. SyscallLog reports progress.
+	SyscallInput  = "sys.input"
+	SyscallOutput = "sys.output"
+	SyscallLog    = "sys.log"
+	// SyscallAbort abandons the open section and runs it again.
+	SyscallAbort = "sys.abort"
+	// SyscallTimer parks the process until a duration passes.
+	SyscallTimer = "sys.timer"
+	// SyscallDeclassify asks a human to lift labels from the run's taint.
 	SyscallDeclassify = "sys.declassify"
-	SyscallNow        = "sys.now"
-	SyscallRandom     = "sys.random"
+	// SyscallNow and SyscallRandom read the real clock and real entropy. The
+	// journal records the values, so a replay sees the same ones.
+	SyscallNow    = "sys.now"
+	SyscallRandom = "sys.random"
 )
 
 // Syscall is the guest-to-host request crossing the syscall boundary.
@@ -41,12 +46,13 @@ type Syscall struct {
 	Args json.RawMessage `json:"args,omitempty"`
 }
 
+// Copy returns the syscall with its own copy of the args.
 func (sc Syscall) Copy() Syscall {
 	sc.Args = append(json.RawMessage(nil), sc.Args...)
 	return sc
 }
 
-// SyscallStatus identifies a handler or replay result.
+// SyscallStatus is the kind of a SyscallResult.
 type SyscallStatus string
 
 const (
@@ -69,7 +75,10 @@ const (
 	ErrnoBadABI      Errno = "bad_abi"      // syscall ABI version mismatch
 )
 
-// SyscallResult is the ADT returned to guest syscalls.
+// SyscallResult is the outcome of one syscall: a result, a yield (the call
+// waits on something outside the process), or a failure with an Errno. It also
+// carries provenance labels, which the host keeps and never shows the guest.
+// It is a value: every accessor returns a copy.
 type SyscallResult struct {
 	status  SyscallStatus
 	errno   Errno
@@ -78,10 +87,13 @@ type SyscallResult struct {
 	labels  []string
 }
 
+// Result returns a successful outcome carrying the result JSON.
 func Result(result json.RawMessage) SyscallResult {
 	return SyscallResult{status: StatusResult, result: append(json.RawMessage(nil), result...)}
 }
 
+// Yield returns an outcome that parks the process. message says what it waits
+// on.
 func Yield(message string) SyscallResult {
 	return SyscallResult{status: StatusYield, message: message}
 }
@@ -105,10 +117,12 @@ func (r SyscallResult) Errno() Errno {
 	return r.errno
 }
 
+// Result returns the result JSON. It is empty unless Status is StatusResult.
 func (r SyscallResult) Result() json.RawMessage {
 	return append(json.RawMessage(nil), r.result...)
 }
 
+// Message returns the human text of a failure or a yield.
 func (r SyscallResult) Message() string {
 	return r.message
 }
@@ -139,6 +153,7 @@ func (r SyscallResult) WithLabels(labels ...string) SyscallResult {
 	return r
 }
 
+// Copy returns the result with its own copies of the result and the labels.
 func (r SyscallResult) Copy() SyscallResult {
 	r.result = append(json.RawMessage(nil), r.result...)
 	r.labels = append([]string(nil), r.labels...)

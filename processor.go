@@ -132,6 +132,87 @@ func (process *Process[K]) Close(ctx context.Context) error {
 	return process.plugin.Close(ctx)
 }
 
+// ResumeStatus is how one quantum ended.
+type ResumeStatus string
+
+const (
+	ResumeCompleted ResumeStatus = "completed"
+	ResumeYielded   ResumeStatus = "yielded"
+	ResumeStopped   ResumeStatus = "stopped"
+	ResumeFailed    ResumeStatus = "failed"
+)
+
+// ResumeResult is how one quantum ended. Output is the guest's own output. Err
+// says why a quantum failed or was stopped.
+type ResumeResult struct {
+	Status ResumeStatus
+	Output json.RawMessage
+	Err    error
+}
+
+// Resume gives a process the CPU in its own goroutine and returns the channel
+// its outcome arrives on. The process runs until it completes, yields, fails,
+// or is stopped — cooperative scheduling, no preemption. ctx is the only way to
+// stop it: a guest still running when ctx ends is stopped, and a stopped
+// process is terminated.
+func Resume[K any](ctx context.Context, process *Process[K]) (<-chan ResumeResult, error) {
+	if err := process.state.start(); err != nil {
+		return nil, err
+	}
+	// A resume runs the entrypoint again from the top, often on a warm instance
+	// whose pinned clock and RNG already advanced. Reset them, so the run sees
+	// the same ambient sequence a cold replay would (law #2). state.start
+	// guarantees no other quantum of this process is running.
+	process.ambient.reset()
+
+	results := make(chan ResumeResult, 1)
+	go func() {
+		defer close(results)
+		results <- process.run(ctx)
+	}()
+	return results, nil
+}
+
+// run calls the entrypoint once and reports how the call ended.
+func (process *Process[K]) run(ctx context.Context) ResumeResult {
+	spec := process.spec
+	// The host function finds this process's dispatch in the call context: the
+	// dispatcher, already bound to the credential.
+	dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
+		return spec.Dispatcher.Dispatch(ctx, spec.Cred, syscall, sys.Authorization{})
+	})
+	_, output, err := process.plugin.CallWithContext(
+		context.WithValue(ctx, syscallContextKey{}, dispatch), spec.Entrypoint, spec.Input)
+
+	stopped := ctx.Err() != nil
+	process.state.finish(stopped)
+	switch {
+	case stopped:
+		return ResumeResult{Status: ResumeStopped, Err: ctx.Err()}
+	case err != nil:
+		return ResumeResult{Status: ResumeFailed, Err: err}
+	}
+	status, err := resumeStatus(output)
+	return ResumeResult{Status: status, Output: output, Err: err}
+}
+
+// resumeStatus reads the status a guest reports in its output: completed or
+// yielded. Anything else is a failure.
+func resumeStatus(output []byte) (ResumeStatus, error) {
+	var envelope struct {
+		Status ResumeStatus `json:"status"`
+	}
+	if err := json.Unmarshal(output, &envelope); err != nil {
+		return ResumeFailed, errors.Join(ErrInvalidGuestOutput, err)
+	}
+	switch envelope.Status {
+	case ResumeCompleted, ResumeYielded:
+		return envelope.Status, nil
+	}
+	return ResumeFailed, errors.Join(ErrInvalidGuestOutput, errors.New("status must be completed or yielded"))
+}
+
+// processStatus is where a process is in its lifecycle.
 type processStatus uint8
 
 const (
@@ -147,6 +228,8 @@ type processState struct {
 	status processStatus
 }
 
+// start begins a quantum. It refuses a process that is running one already, or
+// that is terminated.
 func (s *processState) start() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -171,6 +254,7 @@ func (s *processState) finish(stopped bool) {
 	}
 }
 
+// terminate ends the process for good. It refuses while a quantum runs.
 func (s *processState) terminate() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -179,79 +263,4 @@ func (s *processState) terminate() error {
 	}
 	s.status = processTerminated
 	return nil
-}
-
-// ResumeStatus is the result of one guest invocation attempt.
-type ResumeStatus string
-
-const (
-	ResumeCompleted ResumeStatus = "completed"
-	ResumeYielded   ResumeStatus = "yielded"
-	ResumeStopped   ResumeStatus = "stopped"
-	ResumeFailed    ResumeStatus = "failed"
-)
-
-// ResumeResult is how one quantum ended. Output is the guest's own output; Err
-// says why a quantum failed or was stopped.
-type ResumeResult struct {
-	Status ResumeStatus
-	Output json.RawMessage
-	Err    error
-}
-
-// Resume gives a process the CPU in its own goroutine and returns the channel
-// its outcome arrives on. The process runs until it completes, yields, fails,
-// or is stopped — cooperative scheduling, no preemption. ctx is the only way to
-// stop it: a guest still running when ctx ends is stopped, and a stopped
-// process is terminated.
-func Resume[K any](ctx context.Context, process *Process[K]) (<-chan ResumeResult, error) {
-	if err := process.state.start(); err != nil {
-		return nil, err
-	}
-	// A resume re-executes the entrypoint from the top on a possibly-warm
-	// instance; reset the pinned clock/RNG so the re-execution observes the same
-	// ambient sequence a cold replay would (law #2). No quantum for this
-	// process runs concurrently — state.start above serializes them — so this is
-	// safe to do before launching the run.
-	process.ambient.reset()
-
-	results := make(chan ResumeResult, 1)
-	go func() {
-		defer close(results)
-		spec := process.spec
-		dispatch := syscallFunc(func(ctx context.Context, syscall sys.Syscall) (sys.SyscallResult, error) {
-			return spec.Dispatcher.Dispatch(ctx, spec.Cred, syscall, sys.Authorization{})
-		})
-		_, output, err := process.plugin.CallWithContext(
-			context.WithValue(ctx, syscallContextKey{}, dispatch), spec.Entrypoint, spec.Input)
-
-		stopped := ctx.Err() != nil
-		process.state.finish(stopped)
-		switch {
-		case stopped:
-			results <- ResumeResult{Status: ResumeStopped, Err: ctx.Err()}
-		case err != nil:
-			results <- ResumeResult{Status: ResumeFailed, Err: err}
-		default:
-			status, err := resumeStatus(output)
-			results <- ResumeResult{Status: status, Output: append(json.RawMessage(nil), output...), Err: err}
-		}
-	}()
-	return results, nil
-}
-
-// resumeStatus reads the status a guest reports in its output: completed or
-// yielded. Anything else is a failure.
-func resumeStatus(output []byte) (ResumeStatus, error) {
-	var envelope struct {
-		Status ResumeStatus `json:"status"`
-	}
-	if err := json.Unmarshal(output, &envelope); err != nil {
-		return ResumeFailed, errors.Join(ErrInvalidGuestOutput, err)
-	}
-	switch envelope.Status {
-	case ResumeCompleted, ResumeYielded:
-		return envelope.Status, nil
-	}
-	return ResumeFailed, errors.Join(ErrInvalidGuestOutput, errors.New("status must be completed or yielded"))
 }
