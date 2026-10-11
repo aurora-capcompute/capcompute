@@ -31,8 +31,6 @@ const (
 	SyscallAbort = "sys.abort"
 	// SyscallTimer parks the process until a duration passes.
 	SyscallTimer = "sys.timer"
-	// SyscallDeclassify asks a human to lift labels from the run's taint.
-	SyscallDeclassify = "sys.declassify"
 	// SyscallNow and SyscallRandom read the real clock and real entropy. The
 	// journal records the values, so a replay sees the same ones.
 	SyscallNow    = "sys.now"

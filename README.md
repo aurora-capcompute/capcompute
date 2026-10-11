@@ -136,7 +136,7 @@ use the same types. A response has one of three statuses:
 The guest returns `{"status":"completed"}` or `{"status":"yielded"}` from its
 exported function. The processor reserves these names: `sys.begin`,
 `sys.commit`, `sys.input`, `sys.output`, `sys.log`, `sys.abort`, `sys.timer`,
-`sys.declassify`, `sys.now`, `sys.random`.
+`sys.now`, `sys.random`.
 
 ## Scope
 

@@ -119,17 +119,19 @@ approval, flow) read it. A leaf driver that makes an authority decision from
      `Authorization`.
    - **Information flow:** each operation declares the source labels its
      results carry (`labels`, for example `untrusted_web`) and the labels that
-     must not flow into it (`taints`). The guest is opaque, so every label a
-     process observes taints everything it does after.
-   - **Declassification** is the `sys.declassify` syscall. It names the labels
-     and a reason, needs a human approval every time, and is journaled, so
-     replay applies it again without a new question. It must be granted like
-     any capability.
+     may flow into it only with a human's approval (`taints`). The guest is
+     opaque, so every label a process observes taints everything it does
+     after.
+   - **Labels are never lifted.** A call whose operation forbids a label the
+     process holds waits for a human, like any approval. The prompt names the
+     labels and the calls that produced them. The approval lets that one call
+     through and is journaled, so replay runs the call again without a new
+     question. The next such call asks again.
 
    *Code:* the runtime's `monitor` package. `monitor.Wrap` puts validation and
-   flow denials above the replay boundary (decided again on every pass, never
-   journaled) and stamped labels below it (journaled once), so a layer on the
-   wrong side cannot be expressed. The monitor also passes the process's taint
+   the taint above the replay boundary (derived again on every pass, never
+   journaled) and stamped labels and approvals below it (journaled once), so a
+   layer on the wrong side cannot be expressed. The monitor also passes the process's taint
    down (`capability.WithTaint`), so a driver that stores data keeps its
    labels. The full chain is in aurora-capcompute's `docs/WALKTHROUGH.md` and
    `internal/agent/dispatcher.go`.
